@@ -15,7 +15,10 @@ class StudentController extends Controller
     public function index(Request $request): View
     {
         $filters = $this->studentFilters($request);
-        $students = $this->studentRows($this->filteredStudents($filters)->get());
+        $studentsLoaded = collect($filters)->contains(fn ($value) => filled($value));
+        $students = $studentsLoaded
+            ? $this->studentRows($this->filteredStudents($filters)->get())
+            : collect();
 
         $filterOptions = [
             'courses' => Student::query()->select('course')->distinct()->orderBy('course')->pluck('course'),
@@ -35,17 +38,27 @@ class StudentController extends Controller
             'editStudent' => $editStudent,
             'filters' => $filters,
             'filterOptions' => $filterOptions,
+            'studentsLoaded' => $studentsLoaded,
         ]);
     }
 
     public function printQr(Request $request): View
     {
         $filters = $this->studentFilters($request);
-        $students = $this->studentRows($this->filteredStudents($filters)->get());
+        $printMode = 'batch';
+
+        if ($request->filled('student')) {
+            $student = Student::find($request->query('student'));
+            $students = $student ? $this->studentRows(collect([$student])) : collect();
+            $printMode = 'individual';
+        } else {
+            $students = $this->studentRows($this->filteredStudents($filters)->get());
+        }
 
         return view('students.qr-print', [
             'students' => $students,
             'filters' => $filters,
+            'printMode' => $printMode,
         ]);
     }
 

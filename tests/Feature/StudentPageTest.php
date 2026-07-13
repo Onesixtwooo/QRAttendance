@@ -33,6 +33,24 @@ class StudentPageTest extends TestCase
         $response->assertDontSee('Time In');
     }
 
+    public function test_students_are_not_loaded_until_a_filter_query_is_applied(): void
+    {
+        Student::create([
+            'student_id' => 'STU-24000',
+            'last_name' => 'Unfiltered',
+            'first_name' => 'Student',
+            'course' => 'Information Technology',
+            'block' => 'A',
+            'year_level' => '1st Year',
+        ]);
+
+        $response = $this->get('/students');
+
+        $response->assertOk();
+        $response->assertDontSee('STU-24000');
+        $response->assertSee('Use the search or filters above, then click Apply to load students.');
+    }
+
     public function test_student_can_be_saved_to_the_database(): void
     {
         $response = $this->post('/students', [
@@ -70,7 +88,8 @@ class StudentPageTest extends TestCase
         $response = $this->get('/students?edit='.$student->id);
 
         $response->assertOk();
-        $response->assertSee('/students?edit='.$student->id.'#student-form', false);
+        $response->assertSee('id="student-form"', false);
+        $response->assertSee('action="'.url('/students/'.$student->id).'"', false);
         $response->assertSee('Editing Student');
         $response->assertSee('Update Student');
         $response->assertSee('Reyes');
@@ -232,14 +251,50 @@ class StudentPageTest extends TestCase
             'year_level' => '4th Year',
         ]);
 
-        $response = $this->get('/students');
+        $response = $this->get('/students?search=STU-29001');
 
         $response->assertOk();
         $response->assertSee('href="#student-qr-modal-'.$student->id.'"', false);
         $response->assertSee('Student QR');
         $response->assertSee('Alyssa Rivera - STU-29001');
         $response->assertSee('QR code for Alyssa Rivera');
+        $response->assertSee('Print Individual QR');
+        $response->assertSee(url('/students/qr-print?search=STU-29001&amp;student='.$student->id), false);
         $response->assertSee(urlencode('"student_id":"STU-29001"'), false);
+    }
+
+    public function test_individual_student_qr_can_be_opened_as_a_printable_card(): void
+    {
+        $student = Student::create([
+            'student_id' => 'STU-29501',
+            'last_name' => 'Davis',
+            'first_name' => 'John',
+            'course' => 'Information Technology',
+            'block' => 'B',
+            'year_level' => '3rd Year',
+        ]);
+
+        Student::create([
+            'student_id' => 'STU-29502',
+            'last_name' => 'Davis',
+            'first_name' => 'Marina',
+            'course' => 'Criminology',
+            'block' => 'A',
+            'year_level' => '2nd Year',
+        ]);
+
+        $response = $this->get('/students/qr-print?search=davis&student='.$student->id);
+
+        $response->assertOk();
+        $response->assertSee('Student QR Print Card');
+        $response->assertSee('1 QR code for the selected student.');
+        $response->assertSee('Individual student QR code');
+        $response->assertSee('John Davis - STU-29501');
+        $response->assertSee('Information Technology');
+        $response->assertSee('3rd Year - Block B');
+        $response->assertDontSee('Marina Davis');
+        $response->assertDontSee('STU-29502');
+        $response->assertSee(urlencode('"student_id":"STU-29501"'), false);
     }
 
     public function test_filtered_students_can_be_opened_as_a_printable_qr_sheet(): void

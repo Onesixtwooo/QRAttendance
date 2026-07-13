@@ -2,6 +2,8 @@
     $filters = array_merge(['course' => null, 'block' => null, 'year_level' => null, 'search' => null], $filters ?? []);
     $activeFilters = collect($filters)->filter(fn ($value) => filled($value));
     $students = $students ?? collect();
+    $printMode = $printMode ?? 'batch';
+    $isIndividualPrint = $printMode === 'individual';
 @endphp
 
 <!DOCTYPE html>
@@ -155,8 +157,7 @@
             }
 
             .summary {
-                border-color: #a1a1aa;
-                border-radius: 0;
+                display: none;
             }
 
             .qr-grid {
@@ -174,8 +175,14 @@
 <body>
     <header class="toolbar">
         <div>
-            <h1>Student QR Print Sheet</h1>
-            <p class="muted">{{ $students->count() }} QR code(s) from the current filtered student list.</p>
+            <h1>{{ $isIndividualPrint ? 'Student QR Print Card' : 'Student QR Print Sheet' }}</h1>
+            <p class="muted">
+                @if ($isIndividualPrint)
+                    {{ $students->count() }} QR code for the selected student.
+                @else
+                    {{ $students->count() }} QR code(s) from the current filtered student list.
+                @endif
+            </p>
         </div>
         <div class="actions">
             <a class="button" href="{{ route('students', $activeFilters->all()) }}">Back</a>
@@ -185,8 +192,14 @@
 
     <main class="sheet">
         <section class="summary">
-            <strong>Filtered student QR codes</strong>
-            @if ($activeFilters->isNotEmpty())
+            <strong>{{ $isIndividualPrint ? 'Individual student QR code' : 'Filtered student QR codes' }}</strong>
+            @if ($isIndividualPrint && $students->isNotEmpty())
+                @php
+                    $student = $students->first();
+                    $studentName = trim($student['first_name'].' '.$student['last_name']);
+                @endphp
+                <p class="muted">{{ $studentName }} - {{ $student['student_id'] }}</p>
+            @elseif ($activeFilters->isNotEmpty())
                 <div class="summary-list">
                     @foreach ($activeFilters as $key => $value)
                         <span>{{ str_replace('_', ' ', ucfirst($key)) }}: {{ $value }}</span>
