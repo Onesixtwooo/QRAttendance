@@ -8,13 +8,6 @@ return new class extends Migration
 {
     public function up(): void
     {
-        if (Schema::hasColumn('students', 'user_id')) {
-            Schema::table('students', function (Blueprint $table): void {
-                $table->dropUnique('students_user_id_unique');
-                $table->dropConstrainedForeignId('user_id');
-            });
-        }
-
         if (Schema::hasColumn('users', 'portal_user_id')) {
             Schema::table('users', function (Blueprint $table): void {
                 $table->dropUnique(['portal_user_id']);
@@ -33,7 +26,7 @@ return new class extends Migration
 
         if (! Schema::hasColumn('students', 'user_id')) {
             Schema::table('students', function (Blueprint $table): void {
-                $table->foreignId('user_id')->nullable()->after('id')->constrained('users')->nullOnDelete();
+                $table->foreignId('user_id')->nullable()->unique()->after('id')->constrained('users')->nullOnDelete();
             });
         }
     }

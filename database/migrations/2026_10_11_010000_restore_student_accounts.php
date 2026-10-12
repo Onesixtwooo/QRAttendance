@@ -8,16 +8,25 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('students', function (Blueprint $table): void {
-            $table->foreignId('user_id')->nullable()->unique()->after('id')->constrained('users')->nullOnDelete();
-        });
+        if (! Schema::hasColumn('students', 'user_id')) {
+            Schema::table('students', function (Blueprint $table): void {
+                $table->foreignId('user_id')->nullable()->unique()->after('id')->constrained('users')->nullOnDelete();
+            });
+        }
     }
 
     public function down(): void
     {
-        Schema::table('students', function (Blueprint $table): void {
-            $table->dropUnique('students_user_id_unique');
-            $table->dropConstrainedForeignId('user_id');
-        });
+        if (Schema::hasColumn('students', 'user_id')) {
+            Schema::table('students', function (Blueprint $table): void {
+                $table->dropForeign(['user_id']);
+            });
+            Schema::table('students', function (Blueprint $table): void {
+                $table->dropUnique('students_user_id_unique');
+            });
+            Schema::table('students', function (Blueprint $table): void {
+                $table->dropColumn('user_id');
+            });
+        }
     }
 };
