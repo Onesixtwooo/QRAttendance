@@ -23,13 +23,13 @@ class BoothAccessTest extends TestCase
 
         $response->assertOk();
         $response->assertSee('QR Scanner');
-        $response->assertSee('Logout');
+        $response->assertSee('Back to Portal');
         $response->assertDontSee('Dashboard');
         $response->assertDontSee('Users');
         $response->assertDontSee('Students');
         $response->assertDontSee('Attendance Records');
         $response->assertDontSee('Event Schedule');
-        $response->assertDontSee('Booths');
+        $response->assertDontSee('Scanner Operators');
         $response->assertDontSee('Export');
         $response->assertDontSee('Add Record');
     }

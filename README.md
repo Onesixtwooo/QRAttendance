@@ -1,10 +1,10 @@
-# SAMSqr
+# OLSHCO
 
-SAMSqr is a web-based Student Attendance Monitoring System that records event attendance through student QR codes. Administrators manage students, scheduled events, booths, and attendance records, while booth accounts scan students during an event that is currently marked **In Progress**.
+OLSHCO is a web-based Student Attendance Monitoring System that records event attendance through student QR codes. Administrators manage students, scheduled events, scanner stations, and attendance records, while scanner operator accounts scan students during an event that is currently marked **In Progress**.
 
 ## Features
 
-- Administrator and booth user roles
+- Administrator and scanner operator roles
 - Student profile management
 - CSV and XLSX student imports
 - Search and query-based student filtering

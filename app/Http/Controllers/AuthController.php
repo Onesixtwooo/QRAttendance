@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
+use App\Models\User;
 
 class AuthController extends Controller
 {
@@ -26,9 +27,9 @@ class AuthController extends Controller
             'password' => ['required', 'string'],
         ]);
 
-        if (! Auth::attempt($credentials, $request->boolean('remember'))) {
+        if (! Auth::attempt([...$credentials, 'is_active' => true], $request->boolean('remember'))) {
             throw ValidationException::withMessages([
-                'email' => 'The email or password is incorrect.',
+                'email' => 'The email or password is incorrect, or this account is disabled.',
             ]);
         }
 
@@ -52,6 +53,10 @@ class AuthController extends Controller
 
     private function redirectPath(string $role): string
     {
-        return $role === 'booth' ? route('scanner') : route('dashboard');
+        return match ($role) {
+            'booth' => route('scanner'),
+            'student' => route('student.portal'),
+            default => route('dashboard'),
+        };
     }
 }

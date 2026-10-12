@@ -6,12 +6,20 @@ use App\Models\AttendanceRecord;
 use App\Models\Booth;
 use App\Models\EventSchedule;
 use App\Models\Student;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 class AttendanceRecordPageTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->actingAs(User::factory()->create(['role' => 'admin']));
+    }
 
     public function test_attendance_records_page_shows_saved_records_and_add_form(): void
     {
@@ -83,6 +91,82 @@ class AttendanceRecordPageTest extends TestCase
             'student_id' => $student->id,
             'scanned_at' => '2026-07-08 08:15:00',
         ]);
+    }
+
+    public function test_attendees_are_sorted_by_last_name_then_first_name(): void
+    {
+        [$event, $booth, $student] = $this->recordDependencies();
+        $student->update(['last_name' => 'Zulu', 'first_name' => 'Aaron']);
+
+        $secondStudent = Student::create([
+            'student_id' => 'STU-31002',
+            'last_name' => 'Adams',
+            'first_name' => 'Zoe',
+            'course' => 'Information Technology',
+            'block' => 'B',
+            'year_level' => '3rd Year',
+        ]);
+        $thirdStudent = Student::create([
+            'student_id' => 'STU-31003',
+            'last_name' => 'Adams',
+            'first_name' => 'Amy',
+            'course' => 'Information Technology',
+            'block' => 'B',
+            'year_level' => '3rd Year',
+        ]);
+
+        foreach ([$student, $secondStudent, $thirdStudent] as $index => $attendee) {
+            AttendanceRecord::create([
+                'event_schedule_id' => $event->id,
+                'booth_id' => $booth->id,
+                'student_id' => $attendee->id,
+                'scanned_at' => '2026-07-08 08:'.str_pad((string) (15 + $index), 2, '0', STR_PAD_LEFT).':00',
+                'scan_type' => 'time_in',
+            ]);
+        }
+
+        $response = $this->get('/attendance-records?event_schedule_id='.$event->id.'&course=Information+Technology');
+
+        $response->assertOk();
+        $response->assertSeeInOrder(['Amy Adams', 'Zoe Adams', 'Aaron Zulu']);
+    }
+
+    public function test_time_in_after_fifteen_minute_grace_period_is_marked_late(): void
+    {
+        [$event, $booth, $student] = $this->recordDependencies();
+
+        AttendanceRecord::create([
+            'event_schedule_id' => $event->id,
+            'booth_id' => $booth->id,
+            'student_id' => $student->id,
+            'scanned_at' => '2026-07-08 08:16:00',
+            'scan_type' => 'time_in',
+        ]);
+
+        $response = $this->get('/attendance-records?event_schedule_id='.$event->id.'&course=Information+Technology');
+
+        $response->assertOk();
+        $response->assertSee('8:16 AM');
+        $response->assertSee('Late');
+    }
+
+    public function test_time_in_at_fifteen_minute_cutoff_is_still_on_time(): void
+    {
+        [$event, $booth, $student] = $this->recordDependencies();
+
+        AttendanceRecord::create([
+            'event_schedule_id' => $event->id,
+            'booth_id' => $booth->id,
+            'student_id' => $student->id,
+            'scanned_at' => '2026-07-08 08:15:00',
+            'scan_type' => 'time_in',
+        ]);
+
+        $response = $this->get('/attendance-records?event_schedule_id='.$event->id.'&course=Information+Technology');
+
+        $response->assertOk();
+        $response->assertSee('8:15 AM');
+        $response->assertSee('On Time');
     }
 
     public function test_attendance_record_can_be_loaded_for_editing(): void

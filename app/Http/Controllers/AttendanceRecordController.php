@@ -296,7 +296,7 @@ class AttendanceRecordController extends Controller
             'booth_id' => ['required', 'exists:booths,id'],
             'student_id' => ['nullable', 'exists:students,id'],
             'scanned_at' => ['required', 'date'],
-            'scan_type' => ['sometimes', 'in:time_in,verification'],
+            'scan_type' => ['sometimes', 'in:time_in,time_out,verification'],
         ]);
     }
 
@@ -356,22 +356,40 @@ class AttendanceRecordController extends Controller
                     ->sortBy('scanned_at')
                     ->first();
                 $timeOut = $studentRecords
-                    ->where('scan_type', AttendanceRecord::TYPE_VERIFICATION)
+                    ->whereIn('scan_type', [AttendanceRecord::TYPE_TIME_OUT, AttendanceRecord::TYPE_VERIFICATION])
                     ->sortByDesc('scanned_at')
                     ->first();
                 $firstRecord = $timeIn ?? $studentRecords->sortBy('scanned_at')->first();
                 $student = $firstRecord->student;
+                $attendanceStatus = null;
+
+                if ($timeIn && $timeIn->eventSchedule) {
+                    $event = $timeIn->eventSchedule;
+                    $eventStartsAt = CarbonImmutable::parse(
+                        $event->event_date->format('Y-m-d').' '.$event->start_time,
+                        config('app.timezone')
+                    );
+                    $attendanceStatus = $timeIn->scanned_at->gt($eventStartsAt->addMinutes(15))
+                        ? 'Late'
+                        : 'On Time';
+                }
 
                 return [
                     'student_id' => $student->student_id,
                     'name' => trim($student->first_name.' '.$student->last_name),
+                    'last_name' => $student->last_name,
+                    'first_name' => $student->first_name,
                     'time_in' => $timeIn?->scanned_at?->format('g:i A'),
                     'time_out' => $timeOut?->scanned_at?->format('g:i A'),
                     'time_in_status' => $timeIn ? 'Done' : 'Pending',
                     'time_out_status' => $timeOut ? 'Done' : 'Pending',
+                    'attendance_status' => $attendanceStatus ?? 'Pending',
                 ];
             })
-            ->sortBy('name')
+            ->sortBy([
+                ['last_name', 'asc'],
+                ['first_name', 'asc'],
+            ])
             ->values();
     }
 

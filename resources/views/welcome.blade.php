@@ -8,7 +8,7 @@
         ['key' => 'scanner', 'label' => 'QR Scanner', 'icon' => 'QR', 'route' => 'scanner'],
         ['key' => 'records', 'label' => 'Attendance Records', 'icon' => 'AR', 'route' => 'records'],
         ['key' => 'schedule', 'label' => 'Event Schedule', 'icon' => 'EV', 'route' => 'schedule'],
-        ['key' => 'booths', 'label' => 'Booths', 'icon' => 'BH', 'route' => 'booths'],
+        ['key' => 'booths', 'label' => 'Scanner Operators', 'icon' => 'SO', 'route' => 'booths'],
     ];
 
     $isBoothUser = auth()->user()?->role === 'booth';
@@ -19,21 +19,18 @@
         ];
     }
 
-    $stats = [
-        ['label' => 'Total Students', 'value' => '1,248', 'change' => '+36 this month', 'tone' => 'bg-emerald-50 text-emerald-700'],
-        ['label' => 'Present Today', 'value' => '1,084', 'change' => '86.9% attendance', 'tone' => 'bg-sky-50 text-sky-700'],
-        ['label' => 'Late Entries', 'value' => '42', 'change' => '-8 vs yesterday', 'tone' => 'bg-amber-50 text-amber-700'],
-        ['label' => 'Active Booths', 'value' => '8', 'change' => '2 need review', 'tone' => 'bg-rose-50 text-rose-700'],
-    ];
+    $stats = $stats ?? [];
+    $attendanceFlow = $attendanceFlow ?? collect();
+    $activeBooths = $activeBooths ?? 0;
 
     $students = $students ?? collect();
+    $showingInitialStudents = $showingInitialStudents ?? false;
     $editStudent = $editStudent ?? null;
     $yearLevels = ['1st Year', '2nd Year', '3rd Year', '4th Year', '5th Year'];
     $filters = array_merge(['course' => null, 'block' => null, 'year_level' => null, 'search' => null], $filters ?? []);
     $filterOptions = $filterOptions ?? ['courses' => collect(), 'blocks' => collect(), 'year_levels' => collect($yearLevels)];
     $activeFilters = collect($filters)->filter(fn ($value) => filled($value))->all();
     $studentsFilteredUrl = route('students', $activeFilters);
-    $studentsQrPrintUrl = route('students.qr-print', $activeFilters);
 
     $records = $records ?? collect();
     $recordFilters = array_merge(['date' => null, 'event_schedule_id' => null], $recordFilters ?? []);
@@ -49,10 +46,8 @@
 
     $users = $users ?? collect();
     $editUser = $editUser ?? null;
-    $userFilters = array_merge(['role' => null], $userFilters ?? []);
     $userCounts = array_merge([
         'admin' => $users->where('role', 'admin')->count(),
-        'booth' => $users->where('role', 'booth')->count(),
     ], $userCounts ?? []);
 @endphp
 
@@ -62,7 +57,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>SAMSqr Admin</title>
+    <title>OLSHCO Admin</title>
     <link rel="preconnect" href="https://fonts.bunny.net">
     <link href="https://fonts.bunny.net/css?family=instrument-sans:400,500,600,700" rel="stylesheet" />
     <style>
@@ -84,7 +79,7 @@
                 <div class="flex items-center gap-3">
                     <div class="grid h-11 w-11 place-items-center rounded-lg bg-zinc-950 text-lg text-white">QR</div>
                     <div>
-                        <p class="text-base font-bold leading-tight">SAMSqr</p>
+                        <p class="text-base font-bold leading-tight">OLSHCO</p>
                         <p class="text-sm text-zinc-500">Attendance Admin</p>
                     </div>
                 </div>
@@ -101,13 +96,16 @@
                     @endforeach
                 </nav>
 
-                @unless ($isBoothUser)
+                @auth
                     <div class="mt-auto rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                        <p class="text-sm font-semibold">Today</p>
-                        <p class="mt-1 text-2xl font-bold">86.9%</p>
-                        <p class="mt-1 text-sm text-zinc-500">Campus attendance rate</p>
+                        <p class="truncate text-sm font-semibold text-zinc-900">{{ auth()->user()->name }}</p>
+                        <p class="truncate text-xs text-zinc-500">{{ auth()->user()->email }}</p>
+                        <form method="POST" action="{{ route('logout') }}" class="mt-3">
+                            @csrf
+                            <button type="submit" class="w-full rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 shadow-sm hover:bg-zinc-100">Logout</button>
+                        </form>
                     </div>
-                @endunless
+                @endauth
             </div>
         </aside>
 
@@ -120,19 +118,10 @@
                     </h1>
                 </div>
                 <div class="flex items-center gap-3">
-                    @unless ($isBoothUser)
+                    @if (! $isBoothUser && $page !== 'students')
                         <button class="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50">Export</button>
-                    @endunless
-                    @auth
-                        <form method="POST" action="{{ route('logout') }}">
-                            @csrf
-                            <button class="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50">Logout</button>
-                        </form>
-                    @endauth
-                    @if (! $isBoothUser && $page === 'students')
-                        <a href="#import-students-modal" class="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50">Import</a>
-                        <a href="#add-student-modal" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Add Record</a>
-                    @elseif (! $isBoothUser && $page === 'records')
+                    @endif
+                    @if (! $isBoothUser && $page === 'records')
                         <a href="#add-attendance-modal" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Add Record</a>
                     @elseif (! $isBoothUser && $page === 'schedule')
                         <a href="#add-event-modal" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Add Record</a>
@@ -140,7 +129,10 @@
                         <a href="#add-booth-modal" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Add Record</a>
                     @elseif (! $isBoothUser && $page === 'users')
                         <a href="#add-admin-modal" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Add Admin</a>
-                    @elseif (! $isBoothUser && $page !== 'users')
+                    @elseif (! $isBoothUser && $page === 'students')
+                        <a href="#add-student-modal" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Add Student</a>
+                        <a href="#import-students-modal" class="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50">Batch Upload</a>
+                    @elseif (! $isBoothUser && ! in_array($page, ['users', 'students'], true))
                         <button class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Add Record</button>
                     @endif
                 </div>
@@ -165,13 +157,13 @@
                             <h2 class="font-bold">Live Attendance Flow</h2>
                         </div>
                         <div class="grid h-72 content-end gap-3 p-5">
-                            @foreach ([82, 58, 91, 76, 88, 67, 94] as $height)
+                            @foreach ($attendanceFlow as $flow)
                                 <div class="flex items-end gap-3">
-                                    <span class="w-16 text-xs font-semibold text-zinc-500">{{ 6 + $loop->index }} AM</span>
+                                    <span class="w-16 text-xs font-semibold text-zinc-500">{{ $flow['label'] }}</span>
                                     <div class="h-7 flex-1 rounded bg-zinc-100">
-                                        <div class="h-7 rounded bg-emerald-500" style="width: {{ $height }}%"></div>
+                                        <div class="h-7 rounded bg-emerald-500" style="width: {{ $flow['width'] }}%"></div>
                                     </div>
-                                    <span class="w-10 text-right text-xs font-semibold text-zinc-500">{{ $height }}%</span>
+                                    <span class="w-10 text-right text-xs font-semibold text-zinc-500">{{ $flow['count'] }}</span>
                                 </div>
                             @endforeach
                         </div>
@@ -183,7 +175,7 @@
                             <div class="text-center">
                                 <div class="mx-auto grid h-20 w-20 place-items-center rounded-lg bg-zinc-950 text-2xl font-bold text-white">QR</div>
                                 <p class="mt-4 font-semibold">Ready to scan</p>
-                                <p class="text-sm text-zinc-500">8 booths connected</p>
+                                <p class="text-sm text-zinc-500">{{ $activeBooths }} {{ Str::plural('booth', $activeBooths) }} connected</p>
                             </div>
                         </div>
                     </article>
@@ -192,31 +184,16 @@
 
             @if ($page === 'users')
                 <section class="grid gap-6">
-                    <div class="grid gap-4 sm:grid-cols-2">
+                    <div>
                         <article class="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
                             <p class="text-sm font-semibold text-zinc-500">Admin Accounts</p>
                             <p class="mt-3 text-3xl font-bold">{{ $userCounts['admin'] }}</p>
                         </article>
-                        <article class="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-                            <p class="text-sm font-semibold text-zinc-500">Booth Accounts</p>
-                            <p class="mt-3 text-3xl font-bold">{{ $userCounts['booth'] }}</p>
-                        </article>
                     </div>
 
                     <section class="rounded-lg border border-zinc-200 bg-white shadow-sm">
-                        <div class="flex flex-col gap-3 border-b border-zinc-200 p-5 sm:flex-row sm:items-center sm:justify-between">
-                            <h2 class="font-bold">User Accounts</h2>
-                            <form method="GET" action="{{ route('users') }}" class="flex items-center gap-2">
-                                <select name="role" class="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 outline-none focus:border-emerald-500">
-                                    <option value="" @selected(! filled($userFilters['role']))>All users</option>
-                                    <option value="admin" @selected($userFilters['role'] === 'admin')>Admins only</option>
-                                    <option value="booth" @selected($userFilters['role'] === 'booth')>Booths only</option>
-                                </select>
-                                <button class="rounded-lg bg-zinc-950 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-zinc-800">Apply</button>
-                                @if (filled($userFilters['role']))
-                                    <a href="{{ route('users') }}" class="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50">Reset</a>
-                                @endif
-                            </form>
+                        <div class="border-b border-zinc-200 p-5">
+                            <h2 class="font-bold">Admin Accounts</h2>
                         </div>
 
                         @if (session('user_status'))
@@ -263,18 +240,18 @@
                                 </label>
 
                                 <label class="grid gap-1 text-sm font-semibold text-zinc-700">
-                                    User Type
-                                    <select name="role" class="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500" required>
-                                        <option value="admin" @selected(old('role', $editUser->role) === 'admin')>Admin</option>
-                                        <option value="booth" @selected(old('role', $editUser->role) === 'booth')>Booth</option>
-                                    </select>
-                                    @error('role') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
-                                </label>
-
-                                <label class="grid gap-1 text-sm font-semibold text-zinc-700">
                                     New Password
                                     <input type="password" name="password" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500">
                                     @error('password') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
+                                </label>
+
+                                <label class="grid gap-1 text-sm font-semibold text-zinc-700">
+                                    Account Status
+                                    <select name="is_active" class="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500" required>
+                                        <option value="1" @selected((string) old('is_active', (int) $editUser->is_active) === '1')>Active</option>
+                                        <option value="0" @selected((string) old('is_active', (int) $editUser->is_active) === '0')>Inactive</option>
+                                    </select>
+                                    @error('is_active') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
                                 </label>
 
                                 <label class="grid gap-1 text-sm font-semibold text-zinc-700">
@@ -295,14 +272,12 @@
                                     <tr>
                                         <th class="px-5 py-3">Name</th>
                                         <th class="px-5 py-3">Email</th>
-                                        <th class="px-5 py-3">User Type</th>
-                                        <th class="px-5 py-3">Assigned Booth</th>
                                         <th class="px-5 py-3">Status</th>
                                         <th class="px-5 py-3">Created</th>
                                         <th class="px-5 py-3 text-right">Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody class="divide-y divide-zinc-100">
+                                    <tbody class="divide-y divide-zinc-100">
                                     @forelse ($users as $user)
                                         <tr>
                                             <td class="px-5 py-4 font-semibold">{{ $user['name'] }}</td>
@@ -395,9 +370,6 @@
                         <div class="flex items-end gap-2">
                             <button class="rounded-lg bg-zinc-950 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-zinc-800">Apply</button>
                             <a href="{{ route('students') }}" class="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50">Reset</a>
-                            @if (count($activeFilters) > 0 && $students->isNotEmpty())
-                                <a href="{{ $studentsQrPrintUrl }}" class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 shadow-sm hover:bg-emerald-100">Print QR</a>
-                            @endif
                         </div>
                     </form>
 
@@ -441,8 +413,8 @@
                             </label>
 
                             <label class="grid gap-1 text-sm font-semibold text-zinc-700">
-                                Block
-                                <input name="block" value="{{ old('block', $editStudent->block) }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500" required>
+                                Block <span class="font-normal text-zinc-400">(optional)</span>
+                                <input name="block" value="{{ old('block', $editStudent->block) }}" placeholder="Leave blank if not assigned" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500">
                                 @error('block') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
                             </label>
 
@@ -464,61 +436,76 @@
                     @endif
 
                     <div class="overflow-x-auto">
-                        <table class="w-full min-w-[920px] text-left text-sm">
+                        <table class="w-full min-w-[680px] text-left text-sm">
                             <thead class="bg-zinc-50 text-xs uppercase text-zinc-500">
                                 <tr>
+                                    <th class="w-12 px-5 py-3">
+                                        <input id="select-all-students" type="checkbox" class="h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500" aria-label="Select all students">
+                                    </th>
                                     <th class="px-5 py-3">Student ID</th>
-                                    <th class="px-5 py-3">Last Name</th>
-                                    <th class="px-5 py-3">First Name</th>
-                                    <th class="px-5 py-3">Course</th>
-                                    <th class="px-5 py-3">Block</th>
-                                    <th class="px-5 py-3">Year Level</th>
+                                    <th class="px-5 py-3">Full Name</th>
                                     <th class="px-5 py-3 text-right">Actions</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-zinc-100">
-                                @forelse ($students as $student)
+                                @if ($students->isEmpty())
                                     <tr>
-                                        <td class="px-5 py-4 font-semibold">{{ $student['student_id'] }}</td>
-                                        <td class="px-5 py-4 text-zinc-600">{{ $student['last_name'] }}</td>
-                                        <td class="px-5 py-4 text-zinc-600">{{ $student['first_name'] }}</td>
-                                        <td class="px-5 py-4 text-zinc-600">{{ $student['course'] }}</td>
-                                        <td class="px-5 py-4 text-zinc-600">{{ $student['block'] }}</td>
-                                        <td class="px-5 py-4 text-zinc-600">{{ $student['year_level'] }}</td>
-                                        <td class="px-5 py-4">
-                                            <div class="flex justify-end gap-2">
-                                                <a href="#student-qr-modal-{{ $student['id'] }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50">QR</a>
-                                                <a href="{{ route('students', array_merge($activeFilters, ['edit' => $student['id']])) }}#student-form" class="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50">Edit</a>
-                                                <form method="POST" action="{{ route('students.destroy', $student['id']) }}">
-                                                    @csrf
-                                                    @method('DELETE')
-                                                    <button class="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50">Delete</button>
-                                                </form>
-                                            </div>
+                                        <td colspan="4" class="px-5 py-4 text-sm text-zinc-500">
+                                            {{ $showingInitialStudents ? 'No student records yet.' : 'No students match the current filters.' }}
                                         </td>
                                     </tr>
-                                    @empty
-                                        <tr>
-                                            <td colspan="7" class="px-5 py-4 text-sm text-zinc-500">
-                                                {{ $studentsLoaded ? 'No students match the current filters.' : 'Use the search or filters above, then click Apply to load students.' }}
-                                            </td>
+                                @else
+                                    @foreach ($students->groupBy('course') as $course => $courseStudents)
+                                        <tr class="bg-emerald-50/70">
+                                            <th colspan="4" class="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-emerald-800">
+                                                Course: {{ $course ?: "Unassigned" }} <span class="font-normal text-emerald-600">({{ $courseStudents->count() }} student{{ $courseStudents->count() === 1 ? "" : "s" }})</span>
+                                            </th>
                                         </tr>
-                                @endforelse
+                                        @foreach ($courseStudents as $student)
+                                            <tr>
+                                                <td class="px-5 py-4">
+                                                    <input type="checkbox" name="student_ids[]" value="{{ $student["id"] }}" form="bulk-delete-students" class="student-selection h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500" aria-label="Select {{ $student["first_name"] }} {{ $student["last_name"] }}">
+                                                </td>
+                                                <td class="px-5 py-4 font-semibold">{{ $student["student_id"] }}</td>
+                                                <td class="px-5 py-4 text-zinc-700">{{ $student["last_name"] }}, {{ $student["first_name"] }}</td>
+                                                <td class="px-5 py-4">
+                                                    <div class="flex justify-end gap-2">
+                                                        <a href="#student-details-modal-{{ $student["id"] }}" class="rounded-lg border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">View</a>
+                                                        <a href="{{ route("students", array_merge($activeFilters, ["edit" => $student["id"]])) }}#student-form" class="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50">Edit</a>
+                                                        <form method="POST" action="{{ route("students.destroy", $student["id"]) }}">
+                                                            @csrf
+                                                            @method("DELETE")
+                                                            <button class="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50">Delete</button>
+                                                        </form>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        @endforeach
+                                    @endforeach
+                                @endif
                             </tbody>
                         </table>
                     </div>
 
                     <div class="flex flex-col gap-3 border-t border-zinc-200 p-5 sm:flex-row sm:items-center sm:justify-between">
                         <p class="text-sm text-zinc-500">
-                            @if ($studentsLoaded)
+                            @if ($showingInitialStudents)
+                                Showing the first <span class="font-semibold text-zinc-800">{{ $students->count() }}</span> student record(s).
+                            @elseif ($studentsLoaded)
                                 <span class="font-semibold text-zinc-800">{{ $students->count() }}</span> student record(s) match the current filters.
                             @else
                                 Student records are loaded only after applying a search or filter.
                             @endif
                         </p>
-                        @if (count($activeFilters) > 0 && $students->isNotEmpty())
-                            <a href="{{ $studentsQrPrintUrl }}" class="rounded-lg bg-zinc-950 px-4 py-2 text-center text-sm font-semibold text-white shadow-sm hover:bg-zinc-800">Print QR</a>
-                        @endif
+                        <div class="flex items-center gap-2">
+                            @if ($students->isNotEmpty())
+                                <form id="bulk-delete-students" method="POST" action="{{ route('students.destroy-selected') }}" onsubmit="return confirm('Delete the selected student records?')">
+                                    @csrf
+                                    @method('DELETE')
+                                    <button id="delete-selected-students" disabled class="rounded-lg border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40">Delete Selected</button>
+                                </form>
+                            @endif
+                        </div>
                     </div>
                 </section>
             @endif
@@ -595,6 +582,7 @@
                             <div><dt class="text-zinc-500">Scan Type</dt><dd id="latest-scan-type" class="font-semibold">-</dd></div>
                             <div><dt class="text-zinc-500">Student</dt><dd id="latest-student" class="font-semibold">No scan yet</dd></div>
                             <div><dt class="text-zinc-500">Student ID</dt><dd id="latest-student-id" class="font-semibold">-</dd></div>
+                            <div class="rounded-lg bg-emerald-50 p-3"><dt class="text-xs font-semibold uppercase text-emerald-700">Verification Code</dt><dd id="latest-verification-code" class="mt-1 font-mono text-lg font-bold tracking-[0.15em] text-emerald-900">-</dd></div>
                             <div><dt class="text-zinc-500">Course / Block</dt><dd id="latest-course" class="font-semibold">-</dd></div>
                             <div><dt class="text-zinc-500">Booth</dt><dd id="latest-booth" class="font-semibold">{{ $scannerBooth?->name ?? '-' }}</dd></div>
                             <div><dt class="text-zinc-500">Time</dt><dd id="latest-time" class="font-semibold">-</dd></div>
@@ -743,6 +731,7 @@
                                                 <th class="px-5 py-3">Student ID</th>
                                                 <th class="px-5 py-3">Student</th>
                                                 <th class="px-5 py-3">Time-in</th>
+                                                <th class="px-5 py-3">Status</th>
                                                 <th class="px-5 py-3">Time-out</th>
                                             </tr>
                                         </thead>
@@ -756,13 +745,16 @@
                                                         <span class="ml-2 rounded-full px-2 py-1 text-xs font-semibold {{ $attendee['time_in_status'] === 'Done' ? 'bg-emerald-50 text-emerald-700' : 'bg-zinc-100 text-zinc-600' }}">{{ $attendee['time_in_status'] }}</span>
                                                     </td>
                                                     <td class="px-5 py-3">
+                                                        <span class="rounded-full px-2 py-1 text-xs font-semibold {{ $attendee['attendance_status'] === 'Late' ? 'bg-amber-50 text-amber-700' : ($attendee['attendance_status'] === 'On Time' ? 'bg-emerald-50 text-emerald-700' : 'bg-zinc-100 text-zinc-600') }}">{{ $attendee['attendance_status'] }}</span>
+                                                    </td>
+                                                    <td class="px-5 py-3">
                                                         <span class="font-semibold text-zinc-800">{{ $attendee['time_out'] ?? 'Pending' }}</span>
                                                         <span class="ml-2 rounded-full px-2 py-1 text-xs font-semibold {{ $attendee['time_out_status'] === 'Done' ? 'bg-emerald-50 text-emerald-700' : 'bg-zinc-100 text-zinc-600' }}">{{ $attendee['time_out_status'] }}</span>
                                                     </td>
                                                 </tr>
                                             @empty
                                                 <tr>
-                                                    <td colspan="4" class="px-5 py-4 text-sm text-zinc-500">
+                                                    <td colspan="5" class="px-5 py-4 text-sm text-zinc-500">
                                                         {{ $record['attendees_loaded'] ? 'No attended students match these filters.' : 'Choose a course, block, or year level, then apply to load attendees.' }}
                                                     </td>
                                                 </tr>
@@ -815,7 +807,7 @@
                                         <h3 class="font-bold">{{ $event['title'] }}</h3>
                                         <p class="mt-1 text-sm text-zinc-500">{{ $event['venue'] }}</p>
                                         @if ($event['status'] === 'In Progress')
-                                            <p class="mt-2 text-xs font-semibold text-zinc-500">Scan phase: <span class="text-zinc-800">{{ $event['scan_phase_label'] }}</span></p>
+                                            <p class="mt-2 text-xs font-semibold text-zinc-500">Active scan: <span class="text-zinc-800">{{ $event['scan_phase_label'] }}</span></p>
                                             <p class="mt-1 text-xs font-semibold text-zinc-500">Time-in: <span class="{{ $event['time_in_open'] ? 'text-emerald-700' : 'text-rose-700' }}">{{ $event['time_in_open'] ? 'Open' : 'Closed' }}</span></p>
                                         @endif
                                     </div>
@@ -828,11 +820,14 @@
                                                     @csrf
                                                     @method('PATCH')
                                                     @if ($event['scan_phase'] === 'time_in')
-                                                        <input type="hidden" name="scan_phase" value="verification">
-                                                        <button class="whitespace-nowrap rounded-lg border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">Activate Verification</button>
-                                                    @else
+                                                        <input type="hidden" name="scan_phase" value="time_out">
+                                                        <button class="whitespace-nowrap rounded-lg border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">Activate Time-out</button>
+                                                    @elseif ($event['scan_phase'] === 'time_out')
                                                         <input type="hidden" name="scan_phase" value="time_in">
-                                                        <button class="whitespace-nowrap rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50">Set Time-in</button>
+                                                        <button class="whitespace-nowrap rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100">Reopen Time-in</button>
+                                                    @else
+                                                        <input type="hidden" name="scan_phase" value="time_out">
+                                                        <button class="whitespace-nowrap rounded-lg border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">Activate Time-out</button>
                                                     @endif
                                                 </form>
                                                 <form method="POST" action="{{ route('schedule.time-in', $event['id']) }}">
@@ -928,7 +923,7 @@
                             </article>
                         @empty
                             <div class="rounded-lg border border-zinc-200 bg-white p-5 text-sm text-zinc-500 shadow-sm md:col-span-2 xl:col-span-4">
-                                No booths yet. Use Add Record to add the first booth.
+                                No scanner operators yet. Use Add Record to add the first operator.
                             </div>
                         @endforelse
                     </div>
@@ -939,44 +934,50 @@
 
     @if ($page === 'students')
         @foreach ($students as $student)
-            @php
-                $studentName = trim($student['first_name'].' '.$student['last_name']);
-                $studentQrPayload = json_encode([
-                    'type' => 'student',
-                    'student_id' => $student['student_id'],
-                    'name' => $studentName,
-                    'course' => $student['course'],
-                    'block' => $student['block'],
-                    'year_level' => $student['year_level'],
-                ], JSON_UNESCAPED_SLASHES);
-                $studentQrImageUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=260x260&data='.urlencode($studentQrPayload);
-                $studentIndividualQrPrintUrl = route('students.qr-print', array_merge($activeFilters, ['student' => $student['id']]));
-            @endphp
-
-            <div id="student-qr-modal-{{ $student['id'] }}" class="modal-overlay fixed inset-0 z-50 place-items-center bg-zinc-950/55 p-4">
-                <div class="w-full max-w-xl rounded-lg bg-white shadow-xl">
+            <div id="student-details-modal-{{ $student['id'] }}" class="modal-overlay fixed inset-0 z-50 place-items-center bg-zinc-950/55 p-4">
+                <div class="w-full max-w-lg rounded-lg bg-white shadow-xl">
                     <div class="flex items-center justify-between border-b border-zinc-200 p-5">
                         <div>
-                            <h2 class="font-bold">Student QR</h2>
-                            <p class="mt-1 text-sm text-zinc-500">{{ $studentName }} - {{ $student['student_id'] }}</p>
+                            <h2 class="font-bold">Student Details</h2>
+                            <p class="mt-1 text-sm text-zinc-500">{{ $student['student_id'] }}</p>
                         </div>
-                        <div class="flex items-center gap-2">
-                            <a href="{{ $studentIndividualQrPrintUrl }}" class="rounded-lg bg-zinc-950 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-zinc-800">Print Individual QR</a>
-                            <a href="{{ $studentsFilteredUrl }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50">Close</a>
-                        </div>
+                        <a href="{{ $studentsFilteredUrl }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50">Close</a>
                     </div>
 
-                    <div class="grid gap-5 p-5 sm:grid-cols-[280px_1fr]">
-                        <div class="grid place-items-center rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                            <img src="{{ $studentQrImageUrl }}" alt="QR code for {{ $studentName }}" class="h-64 w-64 rounded-lg bg-white p-2">
+                    <dl class="grid gap-4 p-5 sm:grid-cols-2">
+                        <div class="sm:col-span-2">
+                            <dt class="text-xs font-semibold uppercase text-zinc-500">Full Name</dt>
+                            <dd class="mt-1 font-bold text-zinc-900">{{ $student['last_name'] }}, {{ $student['first_name'] }}</dd>
                         </div>
-                        <dl class="grid content-start gap-3 text-sm">
-                            <div><dt class="font-semibold text-zinc-500">Student ID</dt><dd class="mt-1 font-bold text-zinc-950">{{ $student['student_id'] }}</dd></div>
-                            <div><dt class="font-semibold text-zinc-500">Name</dt><dd class="mt-1 text-zinc-700">{{ $studentName }}</dd></div>
-                            <div><dt class="font-semibold text-zinc-500">Course</dt><dd class="mt-1 text-zinc-700">{{ $student['course'] }}</dd></div>
-                            <div><dt class="font-semibold text-zinc-500">Block / Year</dt><dd class="mt-1 text-zinc-700">{{ $student['block'] }} - {{ $student['year_level'] }}</dd></div>
-                        </dl>
-                    </div>
+                        <div class="sm:col-span-2 rounded-lg border border-emerald-100 bg-emerald-50 p-4 text-center">
+                            <dt class="text-xs font-semibold uppercase text-emerald-700">Attendance QR Code</dt>
+                            <img data-student-qr-image src="{{ $student['qr_code']['image_url'] }}" data-qr-endpoint="{{ route('students.qr', $student['id']) }}" alt="Attendance QR code for {{ $student['student_id'] }}" class="student-qr-image mx-auto mt-3 h-56 w-56 rounded bg-white p-2">
+                            <p data-student-qr-code class="mt-2 font-mono text-sm font-bold tracking-[0.15em] text-emerald-900">{{ $student['qr_code']['verification_code'] }}</p>
+                            <p class="mt-1 text-xs text-emerald-700">Refreshes automatically every minute while this page is open.</p>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-semibold uppercase text-zinc-500">Course</dt>
+                            <dd class="mt-1 text-sm text-zinc-700">{{ $student['course'] }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-semibold uppercase text-zinc-500">Year Level</dt>
+                            <dd class="mt-1 text-sm text-zinc-700">{{ $student['year_level'] }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-semibold uppercase text-zinc-500">Block</dt>
+                            <dd class="mt-1 text-sm text-zinc-700">{{ $student['block'] ?: 'Not assigned' }}</dd>
+                        </div>
+                    </dl>
+                    <form method="POST" action="{{ route('students.account', $student['id']) }}" class="grid gap-3 border-t border-zinc-200 p-5">
+                        @csrf
+                        <h3 class="font-bold">Student login account</h3>
+                        <p class="text-sm text-zinc-600">Current status: <span class="font-semibold">{{ $student['account_email'] ?: 'Not linked' }}</span></p>
+                        <p class="text-xs text-zinc-500">Set the email and password the student will use to sign in.</p>
+                        <input type="email" name="email" value="{{ $student['account_email'] }}" placeholder="Student email" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm" required>
+                        <input type="password" name="password" placeholder="{{ $student['account_email'] ? 'New password (leave blank to keep current)' : 'Password (at least 8 characters)' }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm" {{ $student['account_email'] ? '' : 'required' }}>
+                        <input type="password" name="password_confirmation" placeholder="Confirm password" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm">
+                        <button class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">{{ $student['account_email'] ? 'Update Login' : 'Create Login' }}</button>
+                    </form>
                 </div>
             </div>
         @endforeach
@@ -995,7 +996,7 @@
                     @csrf
 
                     <div class="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
-                        Required headers: <span class="font-semibold text-zinc-800">student_id, last_name, first_name, course, block, year_level</span>
+                        Required headers: <span class="font-semibold text-zinc-800">student_id, email, last_name, first_name, course, block, year_level</span>
                     </div>
 
                     <label class="grid gap-1 text-sm font-semibold text-zinc-700">
@@ -1012,67 +1013,128 @@
             </div>
         </div>
 
-        <div id="add-student-modal" class="modal-overlay fixed inset-0 z-50 place-items-center bg-zinc-950/55 p-4 {{ $errors->any() && ! $editStudent ? 'is-open' : '' }}">
-            <div class="w-full max-w-4xl rounded-lg bg-white shadow-xl">
+        <div id="add-student-modal" class="modal-overlay fixed inset-0 z-50 place-items-center bg-zinc-950/55 p-4 {{ $errors->bulkStudents->any() ? 'is-open' : '' }}">
+            <div class="flex max-h-[90vh] w-full max-w-7xl flex-col rounded-lg bg-white shadow-xl">
                 <div class="flex items-center justify-between border-b border-zinc-200 p-5">
                     <div>
-                        <h2 class="font-bold">Add Student</h2>
-                        <p class="mt-1 text-sm text-zinc-500">Create a student profile record.</p>
+                        <h2 class="font-bold">Add Students</h2>
+                        <p class="mt-1 text-sm text-zinc-500">Enter multiple student records in spreadsheet format.</p>
                     </div>
                     <a href="{{ route('students') }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50">Close</a>
                 </div>
 
-                <form method="POST" action="{{ route('students.store') }}" class="grid gap-4 p-5 lg:grid-cols-3">
+                <form method="POST" action="{{ route('students.store-bulk') }}" class="flex min-h-0 flex-1 flex-col">
                     @csrf
+                    @php
+                        $bulkStudentRows = old('students', array_fill(0, 5, [
+                            'student_id' => '', 'email' => '', 'last_name' => '', 'first_name' => '',
+                            'course' => '', 'block' => '', 'year_level' => '',
+                        ]));
+                    @endphp
 
-                    <label class="grid gap-1 text-sm font-semibold text-zinc-700">
-                        Student ID
-                        <input name="student_id" value="{{ old('student_id') }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500" required>
-                        @error('student_id') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
-                    </label>
+                    @if ($errors->bulkStudents->any())
+                        <div class="border-b border-rose-100 bg-rose-50 px-5 py-3 text-sm font-semibold text-rose-700">
+                            Please correct the highlighted student rows and save again.
+                        </div>
+                    @endif
 
-                    <label class="grid gap-1 text-sm font-semibold text-zinc-700">
-                        Last Name
-                        <input name="last_name" value="{{ old('last_name') }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500" required>
-                        @error('last_name') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
-                    </label>
+                    <div class="min-h-0 flex-1 overflow-auto p-5">
+                        <table class="w-full min-w-[1100px] border-collapse text-sm">
+                            <thead class="sticky top-0 z-10 bg-zinc-100 text-left text-xs uppercase text-zinc-600">
+                                <tr>
+                                    <th class="w-12 border border-zinc-300 px-3 py-2">#</th>
+                                    <th class="border border-zinc-300 px-3 py-2">Student ID</th>
+                                    <th class="border border-zinc-300 px-3 py-2">Email</th>
+                                    <th class="border border-zinc-300 px-3 py-2">Last Name</th>
+                                    <th class="border border-zinc-300 px-3 py-2">First Name</th>
+                                    <th class="border border-zinc-300 px-3 py-2">Course</th>
+                                    <th class="w-32 border border-zinc-300 px-3 py-2">Block <span class="normal-case font-normal text-zinc-400">(optional)</span></th>
+                                    <th class="w-44 border border-zinc-300 px-3 py-2">Year Level</th>
+                                    <th class="w-12 border border-zinc-300 px-3 py-2"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="bulk-student-rows">
+                                @foreach ($bulkStudentRows as $index => $row)
+                                    <tr class="bulk-student-row">
+                                        <td class="row-number border border-zinc-300 bg-zinc-50 px-3 py-2 text-center font-semibold text-zinc-500">{{ $index + 1 }}</td>
+                                        @foreach (['student_id', 'email', 'last_name', 'first_name'] as $field)
+                                            <td class="border border-zinc-300 p-0">
+                                                <input type="{{ $field === 'email' ? 'email' : 'text' }}" name="students[{{ $index }}][{{ $field }}]" value="{{ $row[$field] ?? '' }}" class="w-full border-0 px-3 py-2 outline-none focus:bg-emerald-50 focus:ring-2 focus:ring-inset focus:ring-emerald-500 {{ $errors->bulkStudents->has("students.{$index}.{$field}") ? 'bg-rose-50' : '' }}">
+                                            </td>
+                                        @endforeach
+                                        <td class="spreadsheet-fill-cell relative border border-zinc-300 p-0" data-fill-field="course">
+                                            <input name="students[{{ $index }}][course]" value="{{ $row['course'] ?? '' }}" list="bulk-course-options" class="w-full border-0 px-3 py-2 outline-none focus:bg-emerald-50 focus:ring-2 focus:ring-inset focus:ring-emerald-500 {{ $errors->bulkStudents->has("students.{$index}.course") ? 'bg-rose-50' : '' }}">
+                                            <button type="button" class="spreadsheet-fill-handle absolute bottom-0 right-0 h-3 w-3 cursor-crosshair border-0 border-l border-t border-emerald-700 bg-emerald-500" title="Drag to fill course" aria-label="Drag to fill course"></button>
+                                        </td>
+                                        <td class="spreadsheet-fill-cell relative border border-zinc-300 p-0" data-fill-field="block">
+                                            <select name="students[{{ $index }}][block]" class="w-full border-0 bg-white px-3 py-2 outline-none focus:bg-emerald-50 focus:ring-2 focus:ring-inset focus:ring-emerald-500 {{ $errors->bulkStudents->has("students.{$index}.block") ? 'bg-rose-50' : '' }}">
+                                                <option value="">No block</option>
+                                                @foreach (range('A', 'G') as $block)
+                                                    <option value="{{ $block }}" @selected(($row['block'] ?? '') === $block)>{{ $block }}</option>
+                                                @endforeach
+                                            </select>
+                                            <button type="button" class="spreadsheet-fill-handle absolute bottom-0 right-0 h-3 w-3 cursor-crosshair border-0 border-l border-t border-emerald-700 bg-emerald-500" title="Drag to fill block" aria-label="Drag to fill block"></button>
+                                        </td>
+                                        <td class="spreadsheet-fill-cell relative border border-zinc-300 p-0" data-fill-field="year_level">
+                                            <select name="students[{{ $index }}][year_level]" class="w-full border-0 bg-white px-3 py-2 outline-none focus:bg-emerald-50 focus:ring-2 focus:ring-inset focus:ring-emerald-500 {{ $errors->bulkStudents->has("students.{$index}.year_level") ? 'bg-rose-50' : '' }}">
+                                                <option value="">Select year level</option>
+                                                @foreach ($yearLevels as $yearLevel)
+                                                    <option value="{{ $yearLevel }}" @selected(($row['year_level'] ?? '') === $yearLevel)>{{ $yearLevel }}</option>
+                                                @endforeach
+                                            </select>
+                                            <button type="button" class="spreadsheet-fill-handle absolute bottom-0 right-0 h-3 w-3 cursor-crosshair border-0 border-l border-t border-emerald-700 bg-emerald-500" title="Drag to fill year level" aria-label="Drag to fill year level"></button>
+                                        </td>
+                                        <td class="border border-zinc-300 p-0 text-center">
+                                            <button type="button" class="remove-student-row h-9 w-9 text-lg font-semibold text-zinc-400 hover:text-rose-600" title="Remove row" aria-label="Remove row">&times;</button>
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
 
-                    <label class="grid gap-1 text-sm font-semibold text-zinc-700">
-                        First Name
-                        <input name="first_name" value="{{ old('first_name') }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500" required>
-                        @error('first_name') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
-                    </label>
-
-                    <label class="grid gap-1 text-sm font-semibold text-zinc-700">
-                        Course
-                        <input name="course" value="{{ old('course') }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500" required>
-                        @error('course') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
-                    </label>
-
-                    <label class="grid gap-1 text-sm font-semibold text-zinc-700">
-                        Block
-                        <input name="block" value="{{ old('block') }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500" required>
-                        @error('block') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
-                    </label>
-
-                    <label class="grid gap-1 text-sm font-semibold text-zinc-700">
-                        Year Level
-                        <select name="year_level" class="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500" required>
-                            <option value="" @selected(old('year_level') === null)>Select year level</option>
-                            @foreach ($yearLevels as $yearLevel)
-                                <option value="{{ $yearLevel }}" @selected(old('year_level') === $yearLevel)>{{ $yearLevel }}</option>
-                            @endforeach
-                        </select>
-                        @error('year_level') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
-                    </label>
-
-                    <div class="flex flex-wrap items-center gap-3 lg:col-span-3">
-                        <button class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Save Student</button>
-                        <a href="{{ route('students') }}" class="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50">Cancel</a>
+                    <div class="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200 p-5">
+                        <button id="add-student-row" type="button" class="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50">Add Row</button>
+                        <div class="flex items-center gap-3">
+                            <button class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Save Students</button>
+                            <a href="{{ route('students') }}" class="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50">Cancel</a>
+                        </div>
                     </div>
                 </form>
             </div>
         </div>
+
+        <template id="bulk-student-row-template">
+            <tr class="bulk-student-row">
+                <td class="row-number border border-zinc-300 bg-zinc-50 px-3 py-2 text-center font-semibold text-zinc-500"></td>
+                @foreach (['student_id', 'email', 'last_name', 'first_name'] as $field)
+                    <td class="border border-zinc-300 p-0"><input type="{{ $field === 'email' ? 'email' : 'text' }}" data-field="{{ $field }}" class="w-full border-0 px-3 py-2 outline-none focus:bg-emerald-50 focus:ring-2 focus:ring-inset focus:ring-emerald-500"></td>
+                @endforeach
+                <td class="spreadsheet-fill-cell relative border border-zinc-300 p-0" data-fill-field="course">
+                    <input data-field="course" list="bulk-course-options" class="w-full border-0 px-3 py-2 outline-none focus:bg-emerald-50 focus:ring-2 focus:ring-inset focus:ring-emerald-500">
+                    <button type="button" class="spreadsheet-fill-handle absolute bottom-0 right-0 h-3 w-3 cursor-crosshair border-0 border-l border-t border-emerald-700 bg-emerald-500" title="Drag to fill course" aria-label="Drag to fill course"></button>
+                </td>
+                <td class="spreadsheet-fill-cell relative border border-zinc-300 p-0" data-fill-field="block">
+                    <select data-field="block" class="w-full border-0 bg-white px-3 py-2 outline-none focus:bg-emerald-50 focus:ring-2 focus:ring-inset focus:ring-emerald-500">
+                        <option value="">No block</option>
+                        @foreach (range('A', 'G') as $block)<option value="{{ $block }}">{{ $block }}</option>@endforeach
+                    </select>
+                    <button type="button" class="spreadsheet-fill-handle absolute bottom-0 right-0 h-3 w-3 cursor-crosshair border-0 border-l border-t border-emerald-700 bg-emerald-500" title="Drag to fill block" aria-label="Drag to fill block"></button>
+                </td>
+                <td class="spreadsheet-fill-cell relative border border-zinc-300 p-0" data-fill-field="year_level">
+                    <select data-field="year_level" class="w-full border-0 bg-white px-3 py-2 outline-none focus:bg-emerald-50 focus:ring-2 focus:ring-inset focus:ring-emerald-500">
+                        <option value="">Select year level</option>
+                        @foreach ($yearLevels as $yearLevel)<option value="{{ $yearLevel }}">{{ $yearLevel }}</option>@endforeach
+                    </select>
+                    <button type="button" class="spreadsheet-fill-handle absolute bottom-0 right-0 h-3 w-3 cursor-crosshair border-0 border-l border-t border-emerald-700 bg-emerald-500" title="Drag to fill year level" aria-label="Drag to fill year level"></button>
+                </td>
+                <td class="border border-zinc-300 p-0 text-center"><button type="button" class="remove-student-row h-9 w-9 text-lg font-semibold text-zinc-400 hover:text-rose-600" title="Remove row" aria-label="Remove row">&times;</button></td>
+            </tr>
+        </template>
+
+        <datalist id="bulk-course-options">
+            @foreach ($filterOptions['courses'] as $course)<option value="{{ $course }}"></option>@endforeach
+        </datalist>
 
     @endif
 
@@ -1297,8 +1359,8 @@
             <div class="w-full max-w-2xl rounded-lg bg-white shadow-xl">
                 <div class="flex items-center justify-between border-b border-zinc-200 p-5">
                     <div>
-                        <h2 class="font-bold">Add Booth</h2>
-                        <p class="mt-1 text-sm text-zinc-500">Create a booth and assign its user-admin.</p>
+                        <h2 class="font-bold">Add Scanner Operator</h2>
+                        <p class="mt-1 text-sm text-zinc-500">Create a scanner station and its operator login.</p>
                     </div>
                     <a href="{{ route('booths') }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50">Close</a>
                 </div>
@@ -1307,19 +1369,19 @@
                     @csrf
 
                     <label class="grid gap-1 text-sm font-semibold text-zinc-700 md:col-span-2">
-                        Booth Name
+                        Scanner Station
                         <input name="name" value="{{ old('name') }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500" required>
                         @error('name') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
                     </label>
 
                     <label class="grid gap-1 text-sm font-semibold text-zinc-700">
-                        User-Admin
+                        Operator Name
                         <input name="admin_name" value="{{ old('admin_name') }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500" required>
                         @error('admin_name') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
                     </label>
 
                     <label class="grid gap-1 text-sm font-semibold text-zinc-700">
-                        Admin Email
+                        Operator Email
                         <input type="email" name="admin_email" value="{{ old('admin_email') }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500" required>
                         @error('admin_email') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
                     </label>
@@ -1336,7 +1398,7 @@
                     </label>
 
                     <div class="flex flex-wrap items-center gap-3 md:col-span-2">
-                        <button class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Save Booth</button>
+                        <button class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Save Scanner Operator</button>
                         <a href="{{ route('booths') }}" class="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50">Cancel</a>
                     </div>
                 </form>
@@ -1348,8 +1410,8 @@
                 <div class="w-full max-w-2xl rounded-lg bg-white shadow-xl">
                     <div class="flex items-center justify-between border-b border-zinc-200 p-5">
                         <div>
-                            <h2 class="font-bold">Editing Booth</h2>
-                            <p class="mt-1 text-sm text-zinc-500">Update booth details and assigned user-admin.</p>
+                            <h2 class="font-bold">Editing Scanner Operator</h2>
+                            <p class="mt-1 text-sm text-zinc-500">Update the scanner station and operator login.</p>
                         </div>
                         <a href="{{ route('booths') }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50">Close</a>
                     </div>
@@ -1364,19 +1426,19 @@
                         @method('PATCH')
 
                         <label class="grid gap-1 text-sm font-semibold text-zinc-700 md:col-span-2">
-                            Booth Name
+                            Scanner Station
                             <input name="name" value="{{ old('name', $editBooth->name) }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500" required>
                             @error('name') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
                         </label>
 
                         <label class="grid gap-1 text-sm font-semibold text-zinc-700">
-                            User-Admin
+                            Operator Name
                             <input name="admin_name" value="{{ old('admin_name', $editBooth->user?->name ?? $editBooth->admin_name) }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500" required>
                             @error('admin_name') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
                         </label>
 
                         <label class="grid gap-1 text-sm font-semibold text-zinc-700">
-                            Admin Email
+                            Operator Email
                             <input type="email" name="admin_email" value="{{ old('admin_email', $editBooth->user?->email ?? $editBooth->admin_email) }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500" required>
                             @error('admin_email') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
                         </label>
@@ -1393,7 +1455,7 @@
                         </label>
 
                         <div class="flex flex-wrap items-center gap-3 md:col-span-2">
-                            <button class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Update Booth</button>
+                            <button class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Update Scanner Operator</button>
                             <a href="{{ route('booths') }}" class="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50">Cancel Edit</a>
                         </div>
                     </form>
@@ -1403,6 +1465,7 @@
     @endif
 
     @if ($page === 'scanner')
+        <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
         <script>
             const scanEndpoint = '{{ route('scanner.scan') }}';
             const scannerHasActiveEvent = @json((bool) $scannerCurrentEvent);
@@ -1418,6 +1481,7 @@
             const latestScanType = document.getElementById('latest-scan-type');
             const latestStudent = document.getElementById('latest-student');
             const latestStudentId = document.getElementById('latest-student-id');
+            const latestVerificationCode = document.getElementById('latest-verification-code');
             const latestCourse = document.getElementById('latest-course');
             const latestBooth = document.getElementById('latest-booth');
             const latestTime = document.getElementById('latest-time');
@@ -1428,6 +1492,8 @@
             let lastScannedAt = 0;
             let scannerMessageTimer = null;
             let scannerAudioContext = null;
+            const fallbackCanvas = document.createElement('canvas');
+            const fallbackContext = fallbackCanvas.getContext('2d', { willReadFrequently: true });
 
             function setScannerMessage(message, tone = 'neutral', autoClear = false) {
                 const classes = {
@@ -1493,6 +1559,7 @@
                 latestScanType.textContent = record.scan_type_label;
                 latestStudent.textContent = record.student;
                 latestStudentId.textContent = record.student_id;
+                latestVerificationCode.textContent = record.verification_code;
                 latestCourse.textContent = `${record.course} / ${record.block} / ${record.year_level}`;
                 latestBooth.textContent = record.booth;
                 latestTime.textContent = record.time;
@@ -1554,15 +1621,27 @@
             }
 
             async function scanFrame() {
-                if (! barcodeDetector || ! video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+                if (! video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
                     return;
                 }
 
                 try {
-                    const codes = await barcodeDetector.detect(video);
+                    if (barcodeDetector) {
+                        const codes = await barcodeDetector.detect(video);
 
-                    if (codes.length > 0) {
-                        await submitScan(codes[0].rawValue);
+                        if (codes.length > 0) {
+                            await submitScan(codes[0].rawValue);
+                        }
+                    } else if (window.jsQR && fallbackContext) {
+                        fallbackCanvas.width = video.videoWidth;
+                        fallbackCanvas.height = video.videoHeight;
+                        fallbackContext.drawImage(video, 0, 0, fallbackCanvas.width, fallbackCanvas.height);
+                        const frame = fallbackContext.getImageData(0, 0, fallbackCanvas.width, fallbackCanvas.height);
+                        const code = window.jsQR(frame.data, frame.width, frame.height, { inversionAttempts: 'attemptBoth' });
+
+                        if (code?.data) {
+                            await submitScan(code.data);
+                        }
                     }
                 } catch (error) {
                     setScannerMessage('Camera scanner paused. You can still enter a student ID manually.', 'error');
@@ -1575,13 +1654,16 @@
                     return;
                 }
 
-                if (! ('BarcodeDetector' in window)) {
-                    setScannerMessage('This browser does not support camera QR scanning. Use the manual student ID field.', 'error');
-                    return;
-                }
-
                 try {
-                    barcodeDetector = new BarcodeDetector({ formats: ['qr_code'] });
+                    barcodeDetector = 'BarcodeDetector' in window
+                        ? new BarcodeDetector({ formats: ['qr_code'] })
+                        : null;
+
+                    if (! barcodeDetector && ! window.jsQR) {
+                        setScannerMessage('This browser has no QR decoder available. Load the QR fallback or use manual entry.', 'error');
+                        return;
+                    }
+
                     scannerStream = await navigator.mediaDevices.getUserMedia({
                         video: {
                             facingMode: 'environment',
@@ -1590,7 +1672,9 @@
                     video.srcObject = scannerStream;
                     await video.play();
                     scanTimer = window.setInterval(scanFrame, 650);
-                    setScannerMessage('Scanner is ready. Point the camera at a student QR code.', 'success');
+                    setScannerMessage(barcodeDetector
+                        ? 'Scanner is ready. Point the camera at a student QR code.'
+                        : 'Fallback scanner is ready. Point the camera at a student QR code.', 'success');
                 } catch (error) {
                     setScannerMessage('Camera access failed. Use HTTPS, localhost, or the manual student ID field.', 'error');
                 }
@@ -1651,6 +1735,153 @@
             sendBoothHeartbeat();
             setInterval(sendBoothHeartbeat, 30000);
             @endif
+        </script>
+    @endif
+
+    @if ($page === 'students')
+        <script>
+            async function refreshStudentQRCodes() {
+                document.querySelectorAll('[data-student-qr-image]').forEach(async (image) => {
+                    try {
+                        const response = await fetch(image.dataset.qrEndpoint, {
+                            headers: { 'Accept': 'application/json' },
+                        });
+
+                        if (! response.ok) {
+                            return;
+                        }
+
+                        const qr = await response.json();
+                        image.src = qr.image_url;
+                        image.closest('[id^="student-details-modal-"]')?.querySelector('[data-student-qr-code]')?.replaceChildren(qr.verification_code);
+                    } catch (error) {
+                        // Keep the current code visible if a refresh fails.
+                    }
+                });
+            }
+
+            window.setInterval(refreshStudentQRCodes, 60000);
+
+            const selectAllStudents = document.getElementById('select-all-students');
+            const studentSelections = Array.from(document.querySelectorAll('.student-selection'));
+            const deleteSelectedStudents = document.getElementById('delete-selected-students');
+
+            function updateStudentSelection() {
+                const selectedCount = studentSelections.filter((checkbox) => checkbox.checked).length;
+
+                if (selectAllStudents) {
+                    selectAllStudents.checked = selectedCount > 0 && selectedCount === studentSelections.length;
+                    selectAllStudents.indeterminate = selectedCount > 0 && selectedCount < studentSelections.length;
+                }
+
+                if (deleteSelectedStudents) {
+                    deleteSelectedStudents.disabled = selectedCount === 0;
+                    deleteSelectedStudents.textContent = selectedCount > 0 ? `Delete Selected (${selectedCount})` : 'Delete Selected';
+                }
+            }
+
+            selectAllStudents?.addEventListener('change', () => {
+                studentSelections.forEach((checkbox) => {
+                    checkbox.checked = selectAllStudents.checked;
+                });
+                updateStudentSelection();
+            });
+            studentSelections.forEach((checkbox) => checkbox.addEventListener('change', updateStudentSelection));
+
+            const bulkStudentRows = document.getElementById('bulk-student-rows');
+            const bulkStudentRowTemplate = document.getElementById('bulk-student-row-template');
+            const addStudentRow = document.getElementById('add-student-row');
+            let spreadsheetFill = null;
+
+            function reindexBulkStudentRows() {
+                const rows = Array.from(bulkStudentRows?.querySelectorAll('.bulk-student-row') ?? []);
+
+                rows.forEach((row, index) => {
+                    row.querySelector('.row-number').textContent = index + 1;
+                    row.querySelectorAll('[name], [data-field]').forEach((field) => {
+                        const fieldName = field.dataset.field ?? field.name.match(/\[([^\]]+)]$/)?.[1];
+
+                        if (fieldName) {
+                            field.name = `students[${index}][${fieldName}]`;
+                        }
+                    });
+                });
+            }
+
+            function bindRemoveStudentRow(button) {
+                button.addEventListener('click', () => {
+                    const rows = bulkStudentRows.querySelectorAll('.bulk-student-row');
+
+                    if (rows.length === 1) {
+                        rows[0].querySelectorAll('input, select').forEach((field) => field.value = '');
+                        return;
+                    }
+
+                    button.closest('.bulk-student-row').remove();
+                    reindexBulkStudentRows();
+                });
+            }
+
+            function fillSpreadsheetCell(cell) {
+                if (! spreadsheetFill || cell?.dataset.fillField !== spreadsheetFill.field) {
+                    return;
+                }
+
+                const field = cell.querySelector('input, select');
+
+                if (field && field.value !== spreadsheetFill.value) {
+                    field.value = spreadsheetFill.value;
+                    field.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }
+
+            function bindSpreadsheetFill(row) {
+                row.querySelectorAll('.spreadsheet-fill-cell').forEach((cell) => {
+                    const field = cell.querySelector('input, select');
+                    const handle = cell.querySelector('.spreadsheet-fill-handle');
+
+                    handle.addEventListener('pointerdown', (event) => {
+                        if (! field.value) {
+                            return;
+                        }
+
+                        event.preventDefault();
+                        spreadsheetFill = { field: cell.dataset.fillField, value: field.value };
+                        document.body.classList.add('select-none');
+                    });
+                    cell.addEventListener('pointerenter', () => fillSpreadsheetCell(cell));
+                });
+            }
+
+            function stopSpreadsheetFill() {
+                spreadsheetFill = null;
+                document.body.classList.remove('select-none');
+            }
+
+            bulkStudentRows?.querySelectorAll('.remove-student-row').forEach(bindRemoveStudentRow);
+            bulkStudentRows?.querySelectorAll('.bulk-student-row').forEach(bindSpreadsheetFill);
+            document.addEventListener('pointermove', (event) => {
+                if (! spreadsheetFill) {
+                    return;
+                }
+
+                const cell = document.elementFromPoint(event.clientX, event.clientY)?.closest('.spreadsheet-fill-cell');
+                fillSpreadsheetCell(cell);
+            });
+            document.addEventListener('pointerup', stopSpreadsheetFill);
+            document.addEventListener('pointercancel', stopSpreadsheetFill);
+            addStudentRow?.addEventListener('click', () => {
+                if (bulkStudentRows.children.length >= 100) {
+                    return;
+                }
+
+                const row = bulkStudentRowTemplate.content.firstElementChild.cloneNode(true);
+                bulkStudentRows.append(row);
+                bindRemoveStudentRow(row.querySelector('.remove-student-row'));
+                bindSpreadsheetFill(row);
+                reindexBulkStudentRows();
+                row.querySelector('input')?.focus();
+            });
         </script>
     @endif
 

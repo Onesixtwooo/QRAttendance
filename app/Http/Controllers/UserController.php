@@ -13,14 +13,8 @@ class UserController extends Controller
 {
     public function index(Request $request): View
     {
-        $filters = [
-            'role' => $request->query('role'),
-        ];
-
         $users = User::query()
-            ->with('booth')
-            ->when($filters['role'] ?? null, fn ($query, $role) => $query->where('role', $role))
-            ->orderBy('role')
+            ->where('role', 'admin')
             ->orderBy('name')
             ->get()
             ->map(fn (User $user): array => [
@@ -29,25 +23,24 @@ class UserController extends Controller
                 'email' => $user->email,
                 'role' => $user->role,
                 'role_label' => ucfirst($user->role),
-                'booth_name' => $user->booth?->name,
-                'booth_status' => $user->booth?->status,
+                'is_active' => $user->is_active,
                 'created_at' => $user->created_at?->format('M j, Y'),
             ]);
 
         $editUser = null;
 
         if ($request->query('edit')) {
-            $editUser = User::with('booth')->find($request->query('edit'));
+            $editUser = User::query()
+                ->where('role', 'admin')
+                ->find($request->query('edit'));
         }
 
         return view('welcome', [
             'page' => 'users',
             'users' => $users,
             'editUser' => $editUser,
-            'userFilters' => $filters,
             'userCounts' => [
                 'admin' => User::where('role', 'admin')->count(),
-                'booth' => User::where('role', 'booth')->count(),
             ],
         ]);
     }
@@ -77,14 +70,15 @@ class UserController extends Controller
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user)],
-            'role' => ['required', Rule::in(['admin', 'booth'])],
+            'is_active' => ['required', 'boolean'],
             'password' => ['nullable', 'string', 'min:8', 'confirmed'],
         ]);
 
         $user->fill([
             'name' => $data['name'],
             'email' => $data['email'],
-            'role' => $data['role'],
+            'role' => 'admin',
+            'is_active' => $data['is_active'],
         ]);
 
         if (! empty($data['password'])) {
@@ -93,14 +87,7 @@ class UserController extends Controller
 
         $user->save();
 
-        if ($data['role'] === 'admin') {
-            Booth::where('user_id', $user->id)->update(['user_id' => null]);
-        } else {
-            Booth::where('user_id', $user->id)->update([
-                'admin_name' => $user->name,
-                'admin_email' => $user->email,
-            ]);
-        }
+        Booth::where('user_id', $user->id)->update(['user_id' => null]);
 
         return redirect()
             ->route('users')

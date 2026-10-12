@@ -13,6 +13,13 @@ class BoothPageTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->actingAs(User::factory()->create(['role' => 'admin']));
+    }
+
     public function test_booths_page_shows_saved_booths_and_add_form(): void
     {
         $booth = Booth::create([
@@ -43,10 +50,10 @@ class BoothPageTest extends TestCase
         $response->assertSee('Admin Cruz');
         $response->assertSee('cruz@example.com');
         $response->assertSee('href="#add-booth-modal"', false);
-        $response->assertSee('Add Booth');
-        $response->assertSee('User-Admin');
+        $response->assertSee('Add Scanner Operator');
+        $response->assertSee('Operator Name');
         $response->assertSee('Password');
-        $response->assertSee('Save Booth');
+        $response->assertSee('Save Scanner Operator');
         $response->assertDontSee('name="status"', false);
     }
 
@@ -95,8 +102,8 @@ class BoothPageTest extends TestCase
         $response->assertOk();
         $response->assertSee('/booths?edit='.$booth->id.'#edit-booth-modal', false);
         $response->assertSee('id="edit-booth-modal"', false);
-        $response->assertSee('Editing Booth');
-        $response->assertSee('Update Booth');
+        $response->assertSee('Editing Scanner Operator');
+        $response->assertSee('Update Scanner Operator');
         $response->assertSee('Science Hall');
         $response->assertSee('Admin Lim');
         $response->assertDontSee('name="status"', false);

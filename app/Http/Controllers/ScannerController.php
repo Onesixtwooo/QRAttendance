@@ -6,6 +6,7 @@ use App\Models\AttendanceRecord;
 use App\Models\Booth;
 use App\Models\EventSchedule;
 use App\Models\Student;
+use App\Support\StudentQrCode;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -34,7 +35,15 @@ class ScannerController extends Controller
             'booth_id' => ['nullable', 'exists:booths,id'],
         ]);
 
-        $studentCode = $this->studentCodeFromPayload($data['payload']);
+        $qrIdentity = $this->studentCodeFromPayload($data['payload']);
+
+        if ($qrIdentity === null) {
+            return response()->json([
+                'message' => 'This student QR code is invalid or has expired. Ask the student to refresh it.',
+            ], 422);
+        }
+
+        $studentCode = $qrIdentity['student_id'];
         $student = Student::query()->where('student_id', $studentCode)->first();
 
         if (! $student) {
@@ -79,16 +88,23 @@ class ScannerController extends Controller
         ]);
 
         return response()->json([
-            'message' => $scanType === AttendanceRecord::TYPE_TIME_IN
-                ? 'Time-in scan saved.'
-                : 'Verification scan saved.',
+            'message' => match ($scanType) {
+                AttendanceRecord::TYPE_TIME_OUT => 'Time-out scan saved.',
+                AttendanceRecord::TYPE_VERIFICATION => 'Verification scan saved.',
+                default => 'Time-in scan saved.',
+            },
             'record' => [
                 'id' => $record->id,
                 'event' => $event->title,
                 'scan_type' => $record->scan_type,
-                'scan_type_label' => $record->scan_type === AttendanceRecord::TYPE_TIME_IN ? 'Time-in' : 'Verification',
+                'scan_type_label' => match ($record->scan_type) {
+                    AttendanceRecord::TYPE_TIME_OUT => 'Time-out',
+                    AttendanceRecord::TYPE_VERIFICATION => 'Verification',
+                    default => 'Time-in',
+                },
                 'student' => trim($student->first_name.' '.$student->last_name),
                 'student_id' => $student->student_id,
+                'verification_code' => $qrIdentity['verification_code'],
                 'course' => $student->course,
                 'block' => $student->block,
                 'year_level' => $student->year_level,
@@ -98,15 +114,25 @@ class ScannerController extends Controller
         ]);
     }
 
-    private function studentCodeFromPayload(string $payload): string
+    private function studentCodeFromPayload(string $payload): ?array
     {
         $decoded = json_decode($payload, true);
 
         if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-            return trim((string) ($decoded['student_id'] ?? ''));
+            if (($decoded['type'] ?? null) !== 'student_dynamic' || ! app(StudentQrCode::class)->valid($decoded)) {
+                return null;
+            }
+
+            return [
+                'student_id' => trim((string) $decoded['student_id']),
+                'verification_code' => strtoupper(substr((string) $decoded['signature'], 0, 8)),
+            ];
         }
 
-        return trim($payload);
+        return [
+            'student_id' => trim($payload),
+            'verification_code' => 'Manual entry',
+        ];
     }
 
     private function currentEvent(): ?EventSchedule
@@ -152,21 +178,23 @@ class ScannerController extends Controller
         if (! $existingTypes->contains(AttendanceRecord::TYPE_TIME_IN)) {
             return [
                 'type' => null,
-                'message' => 'This student needs a time-in scan before verification.',
+                'message' => 'This student needs a time-in scan before time-out.',
                 'status' => 422,
             ];
         }
 
-        if ($existingTypes->contains(AttendanceRecord::TYPE_VERIFICATION)) {
+        $requiredType = AttendanceRecord::TYPE_TIME_OUT;
+
+        if ($existingTypes->contains($requiredType)) {
             return [
                 'type' => null,
-                'message' => 'This student already has a verification scan for the current event.',
+                    'message' => 'This student already has a '.$requiredType.' scan for the current event.',
                 'status' => 409,
             ];
         }
 
         return [
-            'type' => AttendanceRecord::TYPE_VERIFICATION,
+            'type' => $requiredType,
             'message' => null,
             'status' => 200,
         ];

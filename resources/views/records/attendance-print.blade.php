@@ -337,6 +337,7 @@
                                 <th>Student ID</th>
                                 <th>Student</th>
                                 <th>Time-in</th>
+                                <th>Status</th>
                                 <th>Time-out</th>
                             </tr>
                         </thead>
@@ -346,6 +347,7 @@
                                     <td><strong>{{ $attendee['student_id'] }}</strong></td>
                                     <td>{{ $attendee['name'] }}</td>
                                     <td>{{ $attendee['time_in'] ?? 'Pending' }}</td>
+                                    <td>{{ $attendee['attendance_status'] }}</td>
                                     <td>{{ $attendee['time_out'] ?? 'Pending' }}</td>
                                 </tr>
                             @endforeach

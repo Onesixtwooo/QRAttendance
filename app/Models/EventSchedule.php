@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class EventSchedule extends Model
 {
     public const PHASE_TIME_IN = 'time_in';
+    public const PHASE_TIME_OUT = 'time_out';
     public const PHASE_VERIFICATION = 'verification';
 
     protected $fillable = [
@@ -24,7 +25,11 @@ class EventSchedule extends Model
 
     public function scanPhaseLabel(): string
     {
-        return $this->scan_phase === self::PHASE_VERIFICATION ? 'Verification' : 'Time-in';
+        return match ($this->scan_phase) {
+            self::PHASE_TIME_OUT => 'Time-out',
+            self::PHASE_VERIFICATION => 'Time-out',
+            default => 'Time-in',
+        };
     }
 
     protected function casts(): array

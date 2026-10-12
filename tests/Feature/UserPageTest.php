@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Booth;
+use App\Models\Student;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
@@ -12,7 +13,14 @@ class UserPageTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_users_nav_tab_lists_admin_and_booth_accounts(): void
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->actingAs(User::factory()->create(['role' => 'admin']));
+    }
+
+    public function test_users_nav_tab_lists_only_admin_accounts(): void
     {
         User::create([
             'name' => 'System Admin',
@@ -21,19 +29,21 @@ class UserPageTest extends TestCase
             'role' => 'admin',
         ]);
 
-        $boothUser = User::create([
-            'name' => 'Gate Booth',
-            'email' => 'gate@example.com',
+        $studentUser = User::create([
+            'name' => 'Maya Student',
+            'email' => 'maya@example.com',
             'password' => 'secret-pass',
-            'role' => 'booth',
+            'role' => 'student',
         ]);
 
-        Booth::create([
-            'name' => 'Main Gate',
-            'status' => 'Online',
-            'user_id' => $boothUser->id,
-            'admin_name' => 'Gate Booth',
-            'admin_email' => 'gate@example.com',
+        Student::create([
+            'user_id' => $studentUser->id,
+            'student_id' => 'STU-1001',
+            'last_name' => 'Student',
+            'first_name' => 'Maya',
+            'course' => 'BSIT',
+            'block' => 'A',
+            'year_level' => '1st Year',
         ]);
 
         $response = $this->get('/users');
@@ -42,14 +52,13 @@ class UserPageTest extends TestCase
         $response->assertSee('href="'.route('users').'"', false);
         $response->assertSee('Users');
         $response->assertSee('Admin Accounts');
-        $response->assertSee('Booth Accounts');
         $response->assertSee('System Admin');
         $response->assertSee('admin@example.com');
-        $response->assertSee('Admin console');
-        $response->assertSee('Gate Booth');
-        $response->assertSee('gate@example.com');
-        $response->assertSee('Main Gate');
-        $response->assertSee('Online');
+        $response->assertDontSee('Student Accounts');
+        $response->assertDontSee('Maya Student');
+        $response->assertDontSee('maya@example.com');
+        $response->assertDontSee('STU-1001');
+        $response->assertSee('Active');
         $response->assertSee('Edit');
         $response->assertSee('Delete');
         $response->assertSee('href="#add-admin-modal"', false);
@@ -95,7 +104,7 @@ class UserPageTest extends TestCase
         $response->assertSee('admin@example.com');
     }
 
-    public function test_users_can_be_filtered_by_admin_or_booth_role(): void
+    public function test_role_query_does_not_expose_student_accounts(): void
     {
         User::create([
             'name' => 'System Admin',
@@ -104,37 +113,29 @@ class UserPageTest extends TestCase
             'role' => 'admin',
         ]);
 
-        $boothUser = User::create([
-            'name' => 'Gate Booth',
-            'email' => 'gate@example.com',
+        $studentUser = User::create([
+            'name' => 'Maya Student',
+            'email' => 'maya@example.com',
             'password' => 'secret-pass',
-            'role' => 'booth',
+            'role' => 'student',
         ]);
 
-        Booth::create([
-            'name' => 'Main Gate',
-            'status' => 'Online',
-            'user_id' => $boothUser->id,
-            'admin_name' => 'Gate Booth',
-            'admin_email' => 'gate@example.com',
+        Student::create([
+            'user_id' => $studentUser->id,
+            'student_id' => 'STU-1001',
+            'last_name' => 'Student',
+            'first_name' => 'Maya',
+            'course' => 'BSIT',
+            'block' => 'A',
+            'year_level' => '1st Year',
         ]);
 
-        $adminResponse = $this->get('/users?role=admin');
+        $adminResponse = $this->get('/users?role=student');
 
         $adminResponse->assertOk();
-        $adminResponse->assertSee('Admins only');
         $adminResponse->assertSee('System Admin');
-        $adminResponse->assertDontSee('Gate Booth');
-        $adminResponse->assertSee('Reset');
-
-        $boothResponse = $this->get('/users?role=booth');
-
-        $boothResponse->assertOk();
-        $boothResponse->assertSee('Booths only');
-        $boothResponse->assertSee('Gate Booth');
-        $boothResponse->assertSee('Main Gate');
-        $boothResponse->assertDontSee('System Admin');
-        $boothResponse->assertSee('Reset');
+        $adminResponse->assertDontSee('Maya Student');
+        $adminResponse->assertDontSee('Students only');
     }
 
     public function test_user_can_be_updated(): void
@@ -150,6 +151,7 @@ class UserPageTest extends TestCase
             'name' => 'Updated Admin',
             'email' => 'updated@example.com',
             'role' => 'admin',
+            'is_active' => '1',
             'password' => 'new-secret',
             'password_confirmation' => 'new-secret',
         ]);

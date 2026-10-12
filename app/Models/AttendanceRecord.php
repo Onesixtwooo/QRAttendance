@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class AttendanceRecord extends Model
 {
     public const TYPE_TIME_IN = 'time_in';
+    public const TYPE_TIME_OUT = 'time_out';
     public const TYPE_VERIFICATION = 'verification';
 
     protected $fillable = [

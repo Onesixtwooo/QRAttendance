@@ -18,6 +18,14 @@ class RedirectBoothUsersToScanner
             return redirect()->route('scanner');
         }
 
+        if (
+            Auth::user()?->role === 'student'
+            && ! $request->routeIs('student.portal', 'student.qr', 'student.account.update', 'logout')
+        ) {
+            return redirect()->route('student.portal');
+        }
+
+
         return $next($request);
     }
 }

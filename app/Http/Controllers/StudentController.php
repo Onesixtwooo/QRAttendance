@@ -3,11 +3,19 @@
 namespace App\Http\Controllers;
 
 use App\Models\Student;
+use App\Models\User;
+use App\Mail\StudentAccountCredentials;
+use App\Support\StudentQrCode;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
+use Throwable;
 use ZipArchive;
 
 class StudentController extends Controller
@@ -15,10 +23,11 @@ class StudentController extends Controller
     public function index(Request $request): View
     {
         $filters = $this->studentFilters($request);
-        $studentsLoaded = collect($filters)->contains(fn ($value) => filled($value));
-        $students = $studentsLoaded
-            ? $this->studentRows($this->filteredStudents($filters)->get())
-            : collect();
+        $filtersApplied = collect($filters)->contains(fn ($value) => filled($value));
+        $studentQuery = $this->filteredStudents($filters);
+        $students = $this->studentRows(
+            $filtersApplied ? $studentQuery->with('user')->get() : $studentQuery->with('user')->limit(10)->get()
+        );
 
         $filterOptions = [
             'courses' => Student::query()->select('course')->distinct()->orderBy('course')->pluck('course'),
@@ -29,7 +38,7 @@ class StudentController extends Controller
         $editStudent = null;
 
         if ($request->query('edit')) {
-            $editStudent = Student::find($request->query('edit'));
+            $editStudent = Student::with('user')->find($request->query('edit'));
         }
 
         return view('welcome', [
@@ -38,42 +47,104 @@ class StudentController extends Controller
             'editStudent' => $editStudent,
             'filters' => $filters,
             'filterOptions' => $filterOptions,
-            'studentsLoaded' => $studentsLoaded,
+            'studentsLoaded' => true,
+            'showingInitialStudents' => ! $filtersApplied,
         ]);
     }
 
-    public function printQr(Request $request): View
+    public function qr(Student $student, StudentQrCode $qrCode): JsonResponse
     {
-        $filters = $this->studentFilters($request);
-        $printMode = 'batch';
+        return response()->json($qrCode->generate($student));
+    }
 
-        if ($request->filled('student')) {
-            $student = Student::find($request->query('student'));
-            $students = $student ? $this->studentRows(collect([$student])) : collect();
-            $printMode = 'individual';
-        } else {
-            $students = $this->studentRows($this->filteredStudents($filters)->get());
-        }
+    public function saveAccount(Request $request, Student $student): RedirectResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
 
-        return view('students.qr-print', [
-            'students' => $students,
-            'filters' => $filters,
-            'printMode' => $printMode,
+        $user = $student->user;
+        $data = $request->validate([
+            'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user)],
+            'password' => [$user ? 'nullable' : 'required', 'string', 'min:8', 'confirmed'],
         ]);
+
+        DB::transaction(function () use ($student, $user, $data): void {
+            $user ??= new User;
+            $user->name = trim($student->first_name.' '.$student->last_name);
+            $user->email = $data['email'];
+            $user->role = 'student';
+            $user->is_active = true;
+
+            if (filled($data['password'] ?? null)) {
+                $user->password = $data['password'];
+            }
+
+            $user->save();
+            $student->user()->associate($user);
+            $student->save();
+        });
+
+        return redirect()->route('students')->with('student_status', 'Student login account saved.');
     }
 
     public function store(Request $request): RedirectResponse
     {
-        Student::create($this->validated($request));
+        $data = $request->validate(array_merge($this->studentRules(), [
+            'email' => ['nullable', 'email', 'max:255', Rule::unique('users', 'email')],
+        ]));
+        $email = $data['email'] ?? null;
+        unset($data['email']);
+        $student = Student::create($data);
+        if (filled($email)) {
+            $this->provisionAndNotify($student, $email);
+        }
 
         return redirect()
             ->route('students')
             ->with('student_status', 'Student saved.');
     }
 
+    public function storeBulk(Request $request): RedirectResponse
+    {
+        $students = collect($request->input('students', []))
+            ->filter(fn ($student): bool => is_array($student) && collect($student)->contains(fn ($value): bool => filled($value)))
+            ->values()
+            ->all();
+        $request->merge(['students' => $students]);
+
+        $data = $request->validateWithBag('bulkStudents', [
+            'students' => ['required', 'array', 'min:1', 'max:100'],
+            'students.*.student_id' => ['required', 'string', 'max:50', 'distinct', Rule::unique('students', 'student_id')],
+            'students.*.email' => ['nullable', 'email', 'max:255', 'distinct', Rule::unique('users', 'email')],
+            'students.*.last_name' => ['required', 'string', 'max:255'],
+            'students.*.first_name' => ['required', 'string', 'max:255'],
+            'students.*.course' => ['required', 'string', 'max:255'],
+            'students.*.block' => ['nullable', Rule::in(range('A', 'G'))],
+            'students.*.year_level' => ['required', Rule::in(['1st Year', '2nd Year', '3rd Year', '4th Year', '5th Year'])],
+        ]);
+
+        DB::transaction(function () use ($data): void {
+            foreach ($data['students'] as $studentData) {
+                $email = $studentData['email'] ?? null;
+                unset($studentData['email']);
+                $student = Student::create($studentData);
+                if (filled($email)) {
+                    $this->provisionAndNotify($student, $email);
+                }
+            }
+        });
+
+        $count = count($data['students']);
+
+        return redirect()
+            ->route('students')
+            ->with('student_status', "Added {$count} student record(s).");
+    }
+
     public function update(Request $request, Student $student): RedirectResponse
     {
-        $student->update($this->validated($request, $student));
+        $data = $this->validated($request, $student);
+
+        $student->update($data);
 
         return redirect()
             ->route('students')
@@ -82,11 +153,41 @@ class StudentController extends Controller
 
     public function destroy(Student $student): RedirectResponse
     {
-        $student->delete();
+        DB::transaction(function () use ($student): void {
+            $user = $student->user;
+            $student->delete();
+
+            if ($user?->role === 'student') {
+                $user->delete();
+            }
+        });
 
         return redirect()
             ->route('students')
             ->with('student_status', 'Student deleted.');
+    }
+
+    public function destroySelected(Request $request): RedirectResponse
+    {
+        $data = $request->validate([
+            'student_ids' => ['required', 'array', 'min:1'],
+            'student_ids.*' => ['integer', 'distinct', 'exists:students,id'],
+        ]);
+        $students = Student::with('user')->whereKey($data['student_ids'])->get();
+        $deleted = $students->count();
+
+        DB::transaction(function () use ($students): void {
+            foreach ($students as $student) {
+                $user = $student->user;
+                $student->delete();
+
+                if ($user?->role === 'student') {
+                    $user->delete();
+                }
+            }
+        });
+
+        return back()->with('student_status', "Deleted {$deleted} selected student record(s).");
     }
 
     public function import(Request $request): RedirectResponse
@@ -121,13 +222,18 @@ class StudentController extends Controller
 
             if ($validator->fails()) {
                 $skipped++;
+
                 continue;
             }
 
-            Student::updateOrCreate(
+            $student = Student::updateOrCreate(
                 ['student_id' => $data['student_id']],
                 $validator->validated()
             );
+
+            if (filled($data['email'])) {
+                $this->provisionAndNotify($student, $data['email']);
+            }
 
             $imported++;
         }
@@ -172,6 +278,9 @@ class StudentController extends Controller
 
     private function studentRows($students)
     {
+        $qrCode = app(StudentQrCode::class);
+
+
         return $students->map(fn (Student $student): array => [
             'id' => $student->id,
             'student_id' => $student->student_id,
@@ -180,6 +289,8 @@ class StudentController extends Controller
             'course' => $student->course,
             'block' => $student->block,
             'year_level' => $student->year_level,
+            'qr_code' => $qrCode->generate($student),
+            'account_email' => $student->user?->email,
         ]);
     }
 
@@ -195,9 +306,28 @@ class StudentController extends Controller
             'last_name' => ['required', 'string', 'max:255'],
             'first_name' => ['required', 'string', 'max:255'],
             'course' => ['required', 'string', 'max:255'],
-            'block' => ['required', 'string', 'max:50'],
+            'block' => ['nullable', 'string', 'max:50'],
             'year_level' => ['required', Rule::in(['1st Year', '2nd Year', '3rd Year', '4th Year', '5th Year'])],
         ];
+    }
+
+    private function provisionAndNotify(Student $student, string $email): void
+    {
+        $temporaryPassword = str()->random(12);
+        $user = $student->user ?? User::firstOrNew(['email' => $email]);
+        $user->name = trim($student->first_name.' '.$student->last_name);
+        $user->email = $email;
+        $user->password = Hash::make($temporaryPassword);
+        $user->role = 'student';
+        $user->is_active = true;
+        $user->save();
+        $student->user()->associate($user);
+        $student->save();
+        try {
+            Mail::to($email)->send(new StudentAccountCredentials($student->load('user'), $temporaryPassword));
+        } catch (Throwable) {
+            // Keep the saved account usable even if the SMTP server is temporarily unavailable.
+        }
     }
 
     private function readCsv(string $path): array
@@ -216,7 +346,7 @@ class StudentController extends Controller
 
     private function readXlsx(string $path): array
     {
-        $zip = new ZipArchive();
+        $zip = new ZipArchive;
 
         if ($zip->open($path) !== true) {
             return [];
@@ -320,6 +450,7 @@ class StudentController extends Controller
     {
         $aliases = [
             'student_id' => ['student_id', 'studentid', 'student_number', 'id_number'],
+            'email' => ['email', 'email_address'],
             'last_name' => ['last_name', 'lastname', 'surname'],
             'first_name' => ['first_name', 'firstname', 'given_name'],
             'course' => ['course', 'program'],

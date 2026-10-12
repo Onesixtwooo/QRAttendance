@@ -6,6 +6,8 @@ use App\Models\Booth;
 use App\Models\EventSchedule;
 use App\Models\Student;
 use App\Models\User;
+use App\Support\StudentQrCode;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -41,6 +43,8 @@ class ScannerTest extends TestCase
         $response->assertOk();
         $response->assertSee('window.setTimeout', false);
         $response->assertSee('Ready for next scan.', false);
+        $response->assertSee('Verification Code');
+        $response->assertSee('id="latest-verification-code"', false);
         $response->assertSee('playScanBuzzer', false);
         $response->assertSee('}, 2000);', false);
         $this->assertNotNull($booth->fresh()->last_seen_at);
@@ -71,15 +75,13 @@ class ScannerTest extends TestCase
         ]);
 
         $response = $this->actingAs($admin)->postJson('/qr-scanner/scan', [
-            'payload' => json_encode([
-                'type' => 'student',
-                'student_id' => 'STU-24017',
-            ]),
+            'payload' => app(StudentQrCode::class)->generate($student)['payload'],
             'booth_id' => $booth->id,
         ]);
 
         $response->assertOk();
         $response->assertJsonPath('record.student_id', 'STU-24017');
+        $response->assertJsonStructure(['record' => ['verification_code']]);
         $response->assertJsonPath('record.booth', 'Main Gate');
         $response->assertJsonPath('record.event', 'Morning Orientation');
         $response->assertJsonPath('record.scan_type', 'time_in');
@@ -410,6 +412,40 @@ class ScannerTest extends TestCase
         $response->assertStatus(423);
         $response->assertJsonPath('message', 'Time-in scanning is currently closed for this event.');
         $this->assertDatabaseCount('attendance_records', 0);
+    }
+
+    public function test_scanner_rejects_expired_dynamic_student_qr(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $student = Student::create([
+            'student_id' => 'STU-EXPIRED',
+            'last_name' => 'Expired',
+            'first_name' => 'Code',
+            'course' => 'BSIT',
+            'block' => 'A',
+            'year_level' => '1st Year',
+        ]);
+        $payload = app(StudentQrCode::class)
+            ->generate($student, CarbonImmutable::now()->subMinutes(2))['payload'];
+
+        $response = $this->actingAs($admin)->postJson('/qr-scanner/scan', [
+            'payload' => $payload,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('message', 'This student QR code is invalid or has expired. Ask the student to refresh it.');
+    }
+
+    public function test_scanner_rejects_legacy_static_student_qr(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $response = $this->actingAs($admin)->postJson('/qr-scanner/scan', [
+            'payload' => json_encode(['type' => 'student', 'student_id' => 'STU-OLD']),
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('message', 'This student QR code is invalid or has expired. Ask the student to refresh it.');
     }
 
     private function activeEvent(array $overrides = []): EventSchedule

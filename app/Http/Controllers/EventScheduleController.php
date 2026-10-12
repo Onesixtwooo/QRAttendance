@@ -61,7 +61,7 @@ class EventScheduleController extends Controller
     public function updateScanPhase(Request $request, EventSchedule $eventSchedule): RedirectResponse
     {
         $data = $request->validate([
-            'scan_phase' => ['required', 'in:time_in,verification'],
+            'scan_phase' => ['required', 'in:time_in,time_out'],
         ]);
 
         $eventSchedule->update($data);
@@ -127,7 +127,9 @@ class EventScheduleController extends Controller
             'venue' => $event->venue,
             'booth' => $event->booth,
             'status' => $status,
-            'scan_phase' => $event->scan_phase ?? EventSchedule::PHASE_TIME_IN,
+            'scan_phase' => in_array($event->scan_phase, [EventSchedule::PHASE_TIME_IN, EventSchedule::PHASE_TIME_OUT], true)
+                ? $event->scan_phase
+                : EventSchedule::PHASE_TIME_OUT,
             'scan_phase_label' => $event->scanPhaseLabel(),
             'time_in_open' => $event->time_in_open ?? true,
         ];

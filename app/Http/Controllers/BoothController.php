@@ -61,7 +61,7 @@ class BoothController extends Controller
 
         return redirect()
             ->route('booths')
-            ->with('booth_status', 'Booth and user-admin login saved.');
+            ->with('booth_status', 'Scanner operator login saved.');
     }
 
     public function update(Request $request, Booth $booth): RedirectResponse
@@ -102,7 +102,7 @@ class BoothController extends Controller
 
         return redirect()
             ->route('booths')
-            ->with('booth_status', 'Booth updated.');
+            ->with('booth_status', 'Scanner operator updated.');
     }
 
     public function destroy(Booth $booth): RedirectResponse
@@ -111,7 +111,7 @@ class BoothController extends Controller
 
         return redirect()
             ->route('booths')
-            ->with('booth_status', 'Booth deleted.');
+            ->with('booth_status', 'Scanner operator deleted.');
     }
 
     public function statuses(): JsonResponse

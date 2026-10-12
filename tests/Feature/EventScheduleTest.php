@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\EventSchedule;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -10,6 +11,13 @@ use Tests\TestCase;
 class EventScheduleTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->actingAs(User::factory()->create(['role' => 'admin']));
+    }
 
     public function test_event_schedule_add_form_opens_from_modal_trigger(): void
     {
@@ -255,6 +263,8 @@ class EventScheduleTest extends TestCase
 
     public function test_event_scan_phase_can_be_updated(): void
     {
+        Carbon::setTestNow('2026-07-08 16:30:00');
+
         $event = EventSchedule::create([
             'title' => 'First Day of Class',
             'event_date' => '2026-07-08',
@@ -262,7 +272,7 @@ class EventScheduleTest extends TestCase
             'end_time' => '17:00',
             'venue' => 'Chevaliers Gym',
             'booth' => 'Not assigned',
-            'status' => 'Scheduled',
+            'status' => 'In Progress',
             'scan_phase' => 'time_in',
         ]);
 
@@ -275,6 +285,23 @@ class EventScheduleTest extends TestCase
             'id' => $event->id,
             'scan_phase' => 'verification',
         ]);
+
+        $page = $this->get('/event-schedule');
+
+        $page->assertOk();
+        $page->assertSee('Cancel Verification');
+
+        $cancelResponse = $this->patch('/event-schedule/'.$event->id.'/scan-phase', [
+            'scan_phase' => 'time_in',
+        ]);
+
+        $cancelResponse->assertRedirect('/event-schedule');
+        $this->assertDatabaseHas('event_schedules', [
+            'id' => $event->id,
+            'scan_phase' => 'time_in',
+        ]);
+
+        Carbon::setTestNow();
     }
 
     public function test_event_time_in_scanning_can_be_closed_and_opened(): void
