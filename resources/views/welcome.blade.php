@@ -533,7 +533,7 @@
                         </div>
 
                         <div id="scanner-message" class="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-center text-base font-semibold text-zinc-600">
-                            Start the camera or enter a student ID manually.
+                            Start the camera and scan a student QR code.
                         </div>
 
                         <div class="mt-4 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
@@ -557,13 +557,6 @@
                             </div>
                         </div>
 
-                        <form id="manual-scan-form" class="mt-5 grid gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-4 md:grid-cols-[1fr_auto] md:items-end">
-                            <label class="grid gap-1 text-sm font-semibold text-zinc-700">
-                                Manual Student ID
-                                <input id="manual-student-code" @disabled(! $scannerCurrentEvent) class="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500 disabled:cursor-not-allowed disabled:bg-zinc-100" placeholder="STU-24017">
-                            </label>
-                            <button @disabled(! $scannerCurrentEvent) class="rounded-lg bg-zinc-950 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300">Submit Scan</button>
-                        </form>
                     </div>
 
                     <aside class="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
@@ -934,8 +927,8 @@
 
     @if ($page === 'students')
         @foreach ($students as $student)
-            <div id="student-details-modal-{{ $student['id'] }}" class="modal-overlay fixed inset-0 z-50 place-items-center bg-zinc-950/55 p-4">
-                <div class="w-full max-w-lg rounded-lg bg-white shadow-xl">
+            <div id="student-details-modal-{{ $student['id'] }}" class="modal-overlay fixed inset-0 z-50 place-items-center overflow-y-auto overscroll-contain bg-zinc-950/55 p-4">
+                <div class="max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-lg bg-white shadow-xl">
                     <div class="flex items-center justify-between border-b border-zinc-200 p-5">
                         <div>
                             <h2 class="font-bold">Student Details</h2>
@@ -1096,11 +1089,28 @@
                     <div class="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200 p-5">
                         <button id="add-student-row" type="button" class="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50">Add Row</button>
                         <div class="flex items-center gap-3">
-                            <button class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Save Students</button>
+                            <button type="submit" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Save Students</button>
                             <a href="{{ route('students') }}" class="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50">Cancel</a>
                         </div>
                     </div>
                 </form>
+            </div>
+        </div>
+
+        <div id="bulk-student-progress" class="fixed inset-0 z-[60] hidden place-items-center bg-zinc-950/60 p-4" role="status" aria-live="polite">
+            <div class="w-full max-w-md rounded-xl bg-white p-6 text-center shadow-2xl">
+                <div class="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-emerald-100 border-t-emerald-600"></div>
+                <h2 class="mt-5 text-lg font-bold text-zinc-900">Sending login credentials</h2>
+                <p id="bulk-student-progress-message" class="mt-2 text-sm text-zinc-600">Preparing student accounts...</p>
+                <div class="mt-5 h-2 overflow-hidden rounded-full bg-zinc-100">
+                    <div id="bulk-student-progress-bar" class="h-full w-0 rounded-full bg-emerald-600 transition-all duration-500"></div>
+                </div>
+                <p id="bulk-student-progress-remaining" class="mt-3 text-xs font-semibold text-zinc-500"></p>
+                <div class="mt-4 text-left">
+                    <p class="text-[11px] font-bold uppercase tracking-wide text-zinc-400">Credential queue</p>
+                    <ol id="bulk-student-progress-list" class="mt-2 max-h-40 space-y-1 overflow-y-auto rounded-lg bg-zinc-50 p-3 text-xs text-zinc-600"></ol>
+                </div>
+                <p class="mt-4 text-xs text-zinc-400">Please keep this page open until the batch is complete.</p>
             </div>
         </div>
 
@@ -1169,7 +1179,7 @@
                 <div class="flex items-center justify-between border-b border-zinc-200 p-5">
                     <div>
                         <h2 class="font-bold">Create Admin</h2>
-                        <p class="mt-1 text-sm text-zinc-500">Add an admin login account.</p>
+                        <p class="mt-1 text-sm text-zinc-500">Add an admin login account. The temporary credentials will be emailed to the address provided.</p>
                     </div>
                     <a href="{{ route('users') }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50">Close</a>
                 </div>
@@ -1193,17 +1203,6 @@
                         Email
                         <input type="email" name="email" value="{{ old('email') }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500" required>
                         @error('email') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
-                    </label>
-
-                    <label class="grid gap-1 text-sm font-semibold text-zinc-700">
-                        Password
-                        <input type="password" name="password" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500" required>
-                        @error('password') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
-                    </label>
-
-                    <label class="grid gap-1 text-sm font-semibold text-zinc-700">
-                        Confirm Password
-                        <input type="password" name="password_confirmation" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500" required>
                     </label>
 
                     <div class="flex flex-wrap items-center gap-3 md:col-span-2">
@@ -1473,8 +1472,6 @@
             const video = document.getElementById('qr-video');
             const startButton = document.getElementById('start-scanner');
             const stopButton = document.getElementById('stop-scanner');
-            const manualForm = document.getElementById('manual-scan-form');
-            const manualInput = document.getElementById('manual-student-code');
             const boothSelect = document.getElementById('scanner-booth-id');
             const scannerMessage = document.getElementById('scanner-message');
             const latestEvent = document.getElementById('latest-event');
@@ -1574,7 +1571,7 @@
                 const cleanPayload = payload.trim();
 
                 if (! cleanPayload) {
-                    setScannerMessage('Scan a QR code or enter a student ID.', 'error', true);
+                    setScannerMessage('Scan a signed student QR code.', 'error', true);
                     return;
                 }
 
@@ -1614,7 +1611,6 @@
                     updateLatestScan(data.record);
                     playScanBuzzer();
                     setScannerMessage(data.message, 'success', true);
-                    manualInput.value = '';
                 } catch (error) {
                     setScannerMessage(error.message, 'error', true);
                 }
@@ -1644,7 +1640,7 @@
                         }
                     }
                 } catch (error) {
-                    setScannerMessage('Camera scanner paused. You can still enter a student ID manually.', 'error');
+                    setScannerMessage('Camera scanner paused. Scan a signed student QR code to continue.', 'error');
                 }
             }
 
@@ -1660,7 +1656,7 @@
                         : null;
 
                     if (! barcodeDetector && ! window.jsQR) {
-                        setScannerMessage('This browser has no QR decoder available. Load the QR fallback or use manual entry.', 'error');
+                        setScannerMessage('This browser has no QR decoder available. Load the QR fallback to scan signed QR codes.', 'error');
                         return;
                     }
 
@@ -1676,7 +1672,7 @@
                         ? 'Scanner is ready. Point the camera at a student QR code.'
                         : 'Fallback scanner is ready. Point the camera at a student QR code.', 'success');
                 } catch (error) {
-                    setScannerMessage('Camera access failed. Use HTTPS, localhost, or the manual student ID field.', 'error');
+                    setScannerMessage('Camera access failed. Use HTTPS or localhost, then scan a signed student QR code.', 'error');
                 }
             }
 
@@ -1695,16 +1691,11 @@
                     video.srcObject = null;
                 }
 
-                setScannerMessage('Scanner stopped. Start the camera or enter a student ID manually.');
+                setScannerMessage('Scanner stopped. Start the camera and scan a student QR code.');
             }
 
             startButton?.addEventListener('click', startScanner);
             stopButton?.addEventListener('click', stopScanner);
-            manualForm?.addEventListener('submit', (event) => {
-                event.preventDefault();
-                submitScan(manualInput.value);
-            });
-
             window.addEventListener('beforeunload', stopScanner);
 
             @if (auth()->user()?->role === 'booth' && auth()->user()->booth)
@@ -1881,6 +1872,101 @@
                 bindSpreadsheetFill(row);
                 reindexBulkStudentRows();
                 row.querySelector('input')?.focus();
+            });
+
+            const bulkStudentForm = bulkStudentRows?.closest('form');
+            const bulkStudentProgress = document.getElementById('bulk-student-progress');
+            const bulkStudentProgressMessage = document.getElementById('bulk-student-progress-message');
+            const bulkStudentProgressRemaining = document.getElementById('bulk-student-progress-remaining');
+            const bulkStudentProgressBar = document.getElementById('bulk-student-progress-bar');
+            const bulkStudentProgressList = document.getElementById('bulk-student-progress-list');
+            let bulkStudentProgressTimer = null;
+            let bulkStudentSubmitStarted = false;
+
+            bulkStudentForm?.addEventListener('submit', (event) => {
+                if (bulkStudentSubmitStarted) {
+                    event.preventDefault();
+                    return;
+                }
+
+                bulkStudentSubmitStarted = true;
+                bulkStudentForm.querySelector('button[type="submit"]')?.setAttribute('disabled', 'disabled');
+                const credentialRows = Array.from(bulkStudentRows.querySelectorAll('.bulk-student-row'))
+                    .map((row) => ({
+                        name: [
+                            row.querySelector('[name$="[first_name]"]')?.value.trim(),
+                            row.querySelector('[name$="[last_name]"]')?.value.trim(),
+                        ].filter(Boolean).join(' '),
+                        email: row.querySelector('[name$="[email]"]')?.value.trim(),
+                    }))
+                    .filter((row) => row.email);
+
+                const total = credentialRows.length;
+                let completed = 0;
+
+                bulkStudentProgress?.classList.remove('hidden');
+                bulkStudentProgress?.classList.add('grid');
+                bulkStudentProgressList.replaceChildren(...credentialRows.map((row, index) => {
+                    const item = document.createElement('li');
+                    item.dataset.queueIndex = String(index);
+                    item.className = 'flex items-start gap-2';
+                    item.innerHTML = '<span class="mt-0.5 text-zinc-300">○</span><span></span>';
+                    item.querySelector('span:last-child').textContent = row.name
+                        ? `${row.name} · ${row.email}`
+                        : row.email;
+                    return item;
+                }));
+
+                if (! total) {
+                    bulkStudentProgressMessage.textContent = 'Saving student records...';
+                    bulkStudentProgressRemaining.textContent = 'No email credentials to send.';
+                    bulkStudentProgressBar.style.width = '100%';
+                    return;
+                }
+
+                const updateProgress = () => {
+                    const current = credentialRows[Math.min(completed, total - 1)];
+                    const remaining = Math.max(total - completed, 0);
+                    const progress = Math.min((completed / total) * 100, 95);
+
+                    bulkStudentProgressMessage.textContent = completed >= total
+                        ? 'Finishing batch and confirming delivery...'
+                        : current.name
+                            ? `Processing ${current.name} (${completed + 1} of ${total})`
+                            : `Processing account ${completed + 1} of ${total}`;
+                    bulkStudentProgressRemaining.textContent = `${remaining} credential${remaining === 1 ? '' : 's'} remaining`;
+                    bulkStudentProgressBar.style.width = `${progress}%`;
+
+                    bulkStudentProgressList.querySelectorAll('li').forEach((item, index) => {
+                        const marker = item.querySelector('span');
+                        const text = item.querySelector('span:last-child');
+
+                        if (index < completed) {
+                            marker.textContent = '✓';
+                            marker.className = 'mt-0.5 text-emerald-600';
+                            text.className = 'text-zinc-400 line-through';
+                        } else if (index === completed) {
+                            marker.textContent = '→';
+                            marker.className = 'mt-0.5 font-bold text-emerald-600';
+                            text.className = 'font-semibold text-zinc-800';
+                        } else {
+                            marker.textContent = '○';
+                            marker.className = 'mt-0.5 text-zinc-300';
+                            text.className = 'text-zinc-600';
+                        }
+                    });
+                };
+
+                updateProgress();
+                bulkStudentProgressTimer = window.setInterval(() => {
+                    completed = Math.min(completed + 1, total);
+                    updateProgress();
+
+                    if (completed >= total) {
+                        window.clearInterval(bulkStudentProgressTimer);
+                        bulkStudentProgressBar.style.width = '95%';
+                    }
+                }, 700);
             });
         </script>
     @endif

@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Mail\AdminAccountCredentials;
 use App\Models\Booth;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
+use Illuminate\Support\Facades\Mail;
+use Throwable;
 
 class UserController extends Controller
 {
@@ -50,19 +53,26 @@ class UserController extends Controller
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')],
-            'password' => ['required', 'string', 'min:8', 'confirmed'],
         ]);
 
-        User::create([
+        $temporaryPassword = str()->random(12);
+        $user = User::create([
             'name' => $data['name'],
             'email' => $data['email'],
-            'password' => $data['password'],
+            'password' => $temporaryPassword,
             'role' => 'admin',
         ]);
 
+        try {
+            Mail::to($user->email)->send(new AdminAccountCredentials($user, $temporaryPassword));
+            $status = 'Admin account created. Login credentials were sent to '.$user->email.'.';
+        } catch (Throwable) {
+            $status = 'Admin account created, but the login email could not be sent. Check the mail settings and resend the credentials.';
+        }
+
         return redirect()
             ->route('users')
-            ->with('user_status', 'Admin account created.');
+            ->with('user_status', $status);
     }
 
     public function update(Request $request, User $user): RedirectResponse

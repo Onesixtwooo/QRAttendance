@@ -15,13 +15,22 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // User::factory(10)->create();
+        $adminName = env('SEED_ADMIN_NAME');
+        $adminEmail = env('SEED_ADMIN_EMAIL');
+        $adminPassword = env('SEED_ADMIN_PASSWORD');
 
-        User::factory()->create([
-            'name' => 'System Admin',
-            'email' => 'admin@attendance.org',
-            'password'=> 'admin@jpcs',
-            'role' => 'admin',
-        ]);
+        if (filled($adminName) && filled($adminEmail) && filled($adminPassword)) {
+            User::firstOrCreate(
+                ['email' => $adminEmail],
+                [
+                    'name' => $adminName,
+                    'password' => $adminPassword,
+                    'role' => 'admin',
+                    'is_active' => true,
+                ]
+            );
+        }
+
+        $this->call(DemoAttendanceSeeder::class);
     }
 }

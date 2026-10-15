@@ -5,8 +5,10 @@ namespace Tests\Feature;
 use App\Models\Booth;
 use App\Models\Student;
 use App\Models\User;
+use App\Mail\AdminAccountCredentials;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
 class UserPageTest extends TestCase
@@ -68,11 +70,11 @@ class UserPageTest extends TestCase
 
     public function test_admin_user_can_be_created_from_users_page(): void
     {
+        Mail::fake();
+
         $response = $this->post('/users', [
             'name' => 'New Admin',
             'email' => 'new-admin@example.com',
-            'password' => 'secret-pass',
-            'password_confirmation' => 'secret-pass',
         ]);
 
         $response->assertRedirect('/users');
@@ -82,7 +84,12 @@ class UserPageTest extends TestCase
         $this->assertNotNull($user);
         $this->assertSame('New Admin', $user->name);
         $this->assertSame('admin', $user->role);
-        $this->assertTrue(Hash::check('secret-pass', $user->password));
+        $this->assertNotSame('', $user->password);
+        Mail::assertSent(AdminAccountCredentials::class, function (AdminAccountCredentials $mail) use ($user): bool {
+            return $mail->hasTo($user->email)
+                && $mail->user->is($user)
+                && Hash::check($mail->temporaryPassword, $user->password);
+        });
     }
 
     public function test_user_can_be_loaded_for_editing(): void

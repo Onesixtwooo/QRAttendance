@@ -119,20 +119,20 @@ class ScannerTest extends TestCase
         ]);
 
         $first = $this->actingAs($admin)->postJson('/qr-scanner/scan', [
-            'payload' => 'STU-24019',
+            'payload' => $this->payloadFor('STU-24019'),
             'booth_id' => $booth->id,
         ]);
         $second = $this->actingAs($admin)->postJson('/qr-scanner/scan', [
-            'payload' => 'STU-24019',
+            'payload' => $this->payloadFor('STU-24019'),
             'booth_id' => $booth->id,
         ]);
         $event->update(['scan_phase' => 'verification']);
         $verification = $this->actingAs($admin)->postJson('/qr-scanner/scan', [
-            'payload' => 'STU-24019',
+            'payload' => $this->payloadFor('STU-24019'),
             'booth_id' => $booth->id,
         ]);
         $third = $this->actingAs($admin)->postJson('/qr-scanner/scan', [
-            'payload' => 'STU-24019',
+            'payload' => $this->payloadFor('STU-24019'),
             'booth_id' => $booth->id,
         ]);
 
@@ -140,9 +140,9 @@ class ScannerTest extends TestCase
         $second->assertStatus(409);
         $second->assertJsonPath('message', 'This student already has a time-in scan for the current event.');
         $verification->assertOk();
-        $verification->assertJsonPath('record.scan_type', 'verification');
+        $verification->assertJsonPath('record.scan_type', 'time_out');
         $third->assertStatus(409);
-        $third->assertJsonPath('message', 'This student already has a verification scan for the current event.');
+        $third->assertJsonPath('message', 'This student already has a time_out scan for the current event.');
         $this->assertDatabaseHas('attendance_records', [
             'event_schedule_id' => $event->id,
             'student_id' => $student->id,
@@ -151,7 +151,7 @@ class ScannerTest extends TestCase
         $this->assertDatabaseHas('attendance_records', [
             'event_schedule_id' => $event->id,
             'student_id' => $student->id,
-            'scan_type' => 'verification',
+            'scan_type' => 'time_out',
         ]);
         $this->assertDatabaseCount('attendance_records', 2);
     }
@@ -188,7 +188,7 @@ class ScannerTest extends TestCase
         ]);
 
         $response = $this->actingAs($boothUser)->postJson('/qr-scanner/scan', [
-            'payload' => 'STU-24018',
+            'payload' => $this->payloadFor('STU-24018'),
             'booth_id' => $otherBooth->id,
         ]);
 
@@ -228,7 +228,8 @@ class ScannerTest extends TestCase
             'booth_id' => $booth->id,
         ]);
 
-        $response->assertNotFound();
+        $response->assertStatus(422);
+        $response->assertJsonPath('message', 'This student QR code is invalid or has expired. Ask the student to refresh it.');
         $this->assertDatabaseCount('attendance_records', 0);
     }
 
@@ -256,7 +257,7 @@ class ScannerTest extends TestCase
         ]);
 
         $response = $this->actingAs($admin)->postJson('/qr-scanner/scan', [
-            'payload' => 'STU-24020',
+            'payload' => $this->payloadFor('STU-24020'),
             'booth_id' => $booth->id,
         ]);
 
@@ -289,7 +290,7 @@ class ScannerTest extends TestCase
         ]);
 
         $response = $this->actingAs($admin)->postJson('/qr-scanner/scan', [
-            'payload' => 'STU-24024',
+            'payload' => $this->payloadFor('STU-24024'),
             'booth_id' => $booth->id,
         ]);
 
@@ -333,7 +334,7 @@ class ScannerTest extends TestCase
         ]);
 
         $response = $this->actingAs($admin)->postJson('/qr-scanner/scan', [
-            'payload' => 'STU-24023',
+            'payload' => $this->payloadFor('STU-24023'),
             'booth_id' => $booth->id,
         ]);
 
@@ -371,12 +372,12 @@ class ScannerTest extends TestCase
         ]);
 
         $response = $this->actingAs($admin)->postJson('/qr-scanner/scan', [
-            'payload' => 'STU-24021',
+            'payload' => $this->payloadFor('STU-24021'),
             'booth_id' => $booth->id,
         ]);
 
         $response->assertStatus(422);
-        $response->assertJsonPath('message', 'This student needs a time-in scan before verification.');
+        $response->assertJsonPath('message', 'This student needs a time-in scan before time-out.');
         $this->assertDatabaseCount('attendance_records', 0);
     }
 
@@ -405,7 +406,7 @@ class ScannerTest extends TestCase
         ]);
 
         $response = $this->actingAs($admin)->postJson('/qr-scanner/scan', [
-            'payload' => 'STU-24022',
+            'payload' => $this->payloadFor('STU-24022'),
             'booth_id' => $booth->id,
         ]);
 
@@ -448,6 +449,13 @@ class ScannerTest extends TestCase
         $response->assertJsonPath('message', 'This student QR code is invalid or has expired. Ask the student to refresh it.');
     }
 
+    private function payloadFor(string $studentId): string
+    {
+        $student = Student::where('student_id', $studentId)->firstOrFail();
+
+        return app(StudentQrCode::class)->generate($student)['payload'];
+    }
+
     private function activeEvent(array $overrides = []): EventSchedule
     {
         return EventSchedule::create(array_merge([
@@ -463,3 +471,7 @@ class ScannerTest extends TestCase
         ], $overrides));
     }
 }
+
+
+
+

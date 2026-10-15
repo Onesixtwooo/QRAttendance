@@ -35,6 +35,51 @@ class PortalAuthenticationTest extends TestCase
         $this->assertGuest();
     }
 
+    public function test_login_is_limited_after_five_failed_attempts(): void
+    {
+        $user = User::factory()->create(['email' => 'limited@example.com', 'password' => 'secret-password', 'role' => 'admin']);
+
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $this->postJson('/login', ['email' => $user->email, 'password' => 'wrong-password'])
+                ->assertUnprocessable()
+                ->assertJsonValidationErrors('email');
+        }
+
+        $this->postJson('/login', ['email' => $user->email, 'password' => 'secret-password'])
+            ->assertStatus(429)
+            ->assertJsonValidationErrors('email');
+        $this->assertGuest();
+
+        $this->travel(61)->seconds();
+
+        $this->post('/login', ['email' => $user->email, 'password' => 'secret-password'])
+            ->assertRedirect(route('dashboard'));
+        $this->assertAuthenticatedAs($user);
+    }
+
+    public function test_successful_login_clears_failed_attempts(): void
+    {
+        $user = User::factory()->create(['email' => 'reset-limit@example.com', 'password' => 'secret-password', 'role' => 'admin']);
+
+        for ($attempt = 0; $attempt < 4; $attempt++) {
+            $this->postJson('/login', ['email' => $user->email, 'password' => 'wrong-password'])
+                ->assertUnprocessable();
+        }
+
+        $this->post('/login', ['email' => $user->email, 'password' => 'secret-password'])
+            ->assertRedirect(route('dashboard'));
+        $this->post('/logout')->assertRedirect(route('login'));
+
+        for ($attempt = 0; $attempt < 4; $attempt++) {
+            $this->postJson('/login', ['email' => $user->email, 'password' => 'wrong-password'])
+                ->assertUnprocessable();
+        }
+
+        $this->post('/login', ['email' => $user->email, 'password' => 'secret-password'])
+            ->assertRedirect(route('dashboard'));
+        $this->assertAuthenticatedAs($user);
+    }
+
     public function test_student_can_register_and_is_sent_to_the_student_portal(): void
     {
         $this->post('/register', [

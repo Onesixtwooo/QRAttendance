@@ -118,20 +118,17 @@ class ScannerController extends Controller
     {
         $decoded = json_decode($payload, true);
 
-        if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-            if (($decoded['type'] ?? null) !== 'student_dynamic' || ! app(StudentQrCode::class)->valid($decoded)) {
-                return null;
-            }
+        if (json_last_error() !== JSON_ERROR_NONE || ! is_array($decoded)) {
+            return null;
+        }
 
-            return [
-                'student_id' => trim((string) $decoded['student_id']),
-                'verification_code' => strtoupper(substr((string) $decoded['signature'], 0, 8)),
-            ];
+        if (($decoded['type'] ?? null) !== 'student_dynamic' || ! app(StudentQrCode::class)->valid($decoded)) {
+            return null;
         }
 
         return [
-            'student_id' => trim($payload),
-            'verification_code' => 'Manual entry',
+            'student_id' => trim((string) $decoded['student_id']),
+            'verification_code' => strtoupper(substr((string) $decoded['signature'], 0, 8)),
         ];
     }
 

@@ -86,7 +86,7 @@ composer run dev
 This starts Laravel, the queue listener, application logs, and Vite. Open:
 
 ```text
-http://127.0.0.1:8000
+http://127.0.0.1:8080
 ```
 
 Alternatively, run Laravel and Vite in separate terminals:
@@ -110,7 +110,7 @@ ipconfig
 For example, if the address is `192.168.100.134`, start Laravel with:
 
 ```powershell
-php artisan serve --host=0.0.0.0 --port=8000
+php artisan serve --host=0.0.0.0 --port=8080
 ```
 
 In a second terminal, set the Vite LAN host and start Vite:
@@ -123,7 +123,7 @@ npm run dev
 Other computers on the same network can then open:
 
 ```text
-http://192.168.100.134:8000
+http://192.168.100.134:8080
 ```
 
 Keep both terminals running. If another device cannot connect, allow PHP and Node.js through Windows Firewall and confirm that both devices are connected to the same network.
@@ -132,7 +132,7 @@ The Vite host must match the current computer address. If CSS is requested from 
 
 ## Mobile camera requirement
 
-Browsers normally require a trusted HTTPS connection before exposing camera and barcode APIs to a web application. A page opened from a plain LAN address such as `http://192.168.100.134:8000` may load correctly while Android Chrome still blocks QR camera scanning.
+Browsers normally require a trusted HTTPS connection before exposing camera and barcode APIs to a web application. A page opened from a plain LAN address such as `http://192.168.100.134:8080` may load correctly while Android Chrome still blocks QR camera scanning.
 
 For reliable mobile scanning, serve the application through trusted HTTPS. Manual student ID entry remains available when camera scanning is unsupported.
 

@@ -323,6 +323,10 @@ class AttendanceRecordPageTest extends TestCase
 
         $response->assertOk();
         $response->assertSee('Attendance Print Sheet');
+        $response->assertSee('Our Lady of the Sacred Heart');
+        $response->assertSee('olshco-seal.jpg');
+        $response->assertSee('Page 1 of 2');
+        $response->assertSee('Page 2 of 2');
         $response->assertSee('Information Technology 3rd Year Block B');
         $response->assertSee('Orientation Attendance');
         $response->assertSee('Mika Santos');
@@ -365,6 +369,8 @@ class AttendanceRecordPageTest extends TestCase
 
         $response->assertOk();
         $response->assertSee('All Attendance Groups');
+        $response->assertSee('Page 1 of 3');
+        $response->assertSee('Page 3 of 3');
         $response->assertSee('Total Students');
         $response->assertSee('Department');
         $response->assertSee('Attended');

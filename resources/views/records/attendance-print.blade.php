@@ -8,6 +8,9 @@
     $totalStudents = $summary['total_students'] ?? 0;
     $percentageLabel = $summary['percentage_label'] ?? '0%';
     $backFilters = collect($filters)->filter(fn ($value) => filled($value))->all();
+    $eventTitle = $event?->title ?? ($summary['event'] ?? 'Attendance Event');
+    $eventDate = $event?->event_date?->format('F j, Y') ?? ($summary['date'] ?? 'No event date');
+    $pageCount = $sections->count() + 1;
 @endphp
 
 <!DOCTYPE html>
@@ -42,6 +45,12 @@
         h2,
         p {
             margin: 0;
+        }
+
+        h1,
+        h2,
+        .document-header {
+            font-family: Tahoma, Arial, sans-serif;
         }
 
         h1 {
@@ -94,20 +103,130 @@
             overflow: hidden;
         }
 
-        .header {
-            display: grid;
-            gap: 16px;
-            grid-template-columns: 1fr auto;
-            padding: 24px;
+        .document-header {
+            border: 1px solid #27272a;
+            table-layout: fixed;
+            overflow-wrap: anywhere;
+            width: 100%;
         }
 
-        .summary {
+        .document-school-column {
+            width: 42%;
+        }
+
+        .document-label-column {
+            width: 17%;
+        }
+
+        .document-header th,
+        .document-header td {
+            background: #fff;
+            border: 1px solid #27272a;
+            color: #18181b;
+            font-size: 13px;
+            font-weight: 400;
+            padding: 9px 10px;
+            text-align: left;
+            text-transform: none;
+            vertical-align: middle;
+        }
+
+        .school-identity-content {
+            align-items: center;
+            display: flex;
+            gap: 12px;
+            min-height: 92px;
+        }
+
+        .school-identity-content > div {
+            min-width: 0;
+        }
+
+        .school-identity img {
+            flex: none;
+            height: 72px;
+            object-fit: contain;
+            width: 72px;
+        }
+
+        .school-identity strong {
+            color: #b91c1c;
+            display: block;
+            font-size: 26px;
+            line-height: 1;
+        }
+
+        .school-identity span {
+            display: block;
+            font-size: 12px;
+            line-height: 1.35;
+            margin-top: 5px;
+        }
+
+        .document-header .document-value,
+        .document-header .document-page {
+            text-align: center;
+        }
+
+        .document-header .document-department {
+            text-align: center;
+        }
+
+        .document-department strong {
+            display: inline-block;
+            margin-top: 4px;
+        }
+
+        .document-header .document-title {
+            font-size: 17px;
+            font-weight: 700;
+            text-align: center;
+        }
+
+        .report-summary {
+            align-items: center;
+            display: flex;
+            gap: 16px;
+            justify-content: space-between;
+            padding: 18px 24px;
+        }
+
+        .report-summary h2 {
+            margin: 0;
+        }
+
+        .report-summary .figures {
             text-align: right;
         }
 
-        .summary strong {
+        .report-summary .figures strong {
             display: block;
-            font-size: 24px;
+            font-size: 22px;
+        }
+
+        @media (max-width: 650px) {
+            .document-header th,
+            .document-header td {
+                font-size: 11px;
+                padding: 6px;
+            }
+
+            .school-identity-content {
+                gap: 5px;
+            }
+
+            .school-identity img {
+                height: 42px;
+                width: 42px;
+            }
+
+            .school-identity strong {
+                font-size: 17px;
+            }
+
+            .school-identity span {
+                font-size: 9px;
+            }
         }
 
         .meta {
@@ -178,6 +297,10 @@
         }
 
         @media print {
+            @page {
+                margin: 12mm;
+            }
+
             body {
                 background: #ffffff;
             }
@@ -189,7 +312,8 @@
             .sheet {
                 margin: 0;
                 max-width: none;
-                padding: 0;
+                padding: 0 2mm;
+                width: 100%;
             }
 
             .paper {
@@ -198,6 +322,15 @@
                 break-after: page;
                 margin-bottom: 0;
                 page-break-after: always;
+                overflow: visible;
+                width: 100%;
+            }
+
+            .document-header,
+            .report-summary,
+            tr {
+                break-inside: avoid;
+                page-break-inside: avoid;
             }
 
             .paper:last-child {
@@ -221,12 +354,19 @@
 
     <main class="sheet">
         <section class="paper">
-            <div class="header">
+            @include('records.attendance-document-header', [
+                'yearBlock' => $groupedPrint ? 'All Year Levels / Blocks' : $filters['year_level'].' / Block '.$filters['block'],
+                'department' => $groupedPrint ? 'All Departments' : $filters['course'],
+                'eventTitle' => $eventTitle,
+                'eventDate' => $eventDate,
+                'pageNumber' => 1,
+                'pageCount' => $pageCount,
+            ])
+            <div class="report-summary">
                 <div>
-                    <h1>{{ $event?->title ?? ($summary['event'] ?? 'Attendance Event') }}</h1>
                     <h2>{{ $groupLabel }}</h2>
                     <p class="muted">
-                        {{ $event?->event_date?->format('F j, Y') ?? ($summary['date'] ?? 'No event date') }}
+                        {{ $eventDate }}
                         @if ($event)
                             | {{ $event->start_time }} - {{ $event->end_time }}
                         @elseif ($summary)
@@ -234,7 +374,7 @@
                         @endif
                     </p>
                 </div>
-                <div class="summary">
+                <div class="figures">
                     <strong>{{ $percentageLabel }}</strong>
                     <p class="muted">{{ $attendedCount }} of {{ $totalStudents }} attended</p>
                     <p class="muted">{{ $summary['scan_count'] ?? 0 }} scan record(s)</p>
@@ -291,12 +431,19 @@
 
         @foreach ($sections as $section)
             <section class="paper">
-                <div class="header">
+                @include('records.attendance-document-header', [
+                    'yearBlock' => $section['year_level'].' / Block '.$section['block'],
+                    'department' => $section['course'],
+                    'eventTitle' => $eventTitle,
+                    'eventDate' => $eventDate,
+                    'pageNumber' => $loop->iteration + 1,
+                    'pageCount' => $pageCount,
+                ])
+                <div class="report-summary">
                     <div>
-                        <h1>{{ $event?->title ?? ($summary['event'] ?? 'Attendance Event') }}</h1>
                         <h2>{{ $section['label'] }}</h2>
                         <p class="muted">
-                            {{ $event?->event_date?->format('F j, Y') ?? ($summary['date'] ?? 'No event date') }}
+                            {{ $eventDate }}
                             @if ($event)
                                 | {{ $event->start_time }} - {{ $event->end_time }}
                             @elseif ($summary)
@@ -304,7 +451,7 @@
                             @endif
                         </p>
                     </div>
-                    <div class="summary">
+                    <div class="figures">
                         <strong>{{ $section['percentage_label'] }}</strong>
                         <p class="muted">{{ $section['attended_count'] }} of {{ $section['total_students'] }} attended</p>
                         <p class="muted">{{ $section['scan_count'] }} scan record(s)</p>
