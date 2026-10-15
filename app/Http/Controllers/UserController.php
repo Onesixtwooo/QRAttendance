@@ -65,14 +65,42 @@ class UserController extends Controller
 
         try {
             Mail::to($user->email)->send(new AdminAccountCredentials($user, $temporaryPassword));
-            $status = 'Admin account created. Login credentials were sent to '.$user->email.'.';
-        } catch (Throwable) {
-            $status = 'Admin account created, but the login email could not be sent. Check the mail settings and resend the credentials.';
+            $status = config('mail.default') === 'log'
+                ? 'Admin account created. Credentials were written to the mail log, not emailed.'
+                : 'Admin account created. Login credentials were submitted to the configured mail transport for '.$user->email.'.';
+        } catch (Throwable $exception) {
+            report($exception);
+            $status = 'Admin account created, but the login email could not be sent. Check the mail settings, then use Resend credentials beside the account.';
         }
 
         return redirect()
             ->route('users')
             ->with('user_status', $status);
+    }
+
+    public function resendCredentials(Request $request, User $user): RedirectResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+        abort_unless($user->role === 'admin', 404);
+
+        if (config('mail.default') === 'log') {
+            return redirect()->route('users')->with('user_status', 'Mail is configured for logging. Configure an email transport before resending admin credentials.');
+        }
+
+        $temporaryPassword = str()->random(12);
+        $previousPassword = $user->password;
+        $user->update(['password' => $temporaryPassword]);
+
+        try {
+            Mail::to($user->email)->send(new AdminAccountCredentials($user, $temporaryPassword));
+            $status = 'New admin credentials submitted to the configured mail transport for '.$user->email.'.';
+        } catch (Throwable $exception) {
+            report($exception);
+            $user->update(['password' => $previousPassword]);
+            $status = 'Admin credentials could not be sent to '.$user->email.'. The existing password still works. Check the mail settings and try again.';
+        }
+
+        return redirect()->route('users')->with('user_status', $status);
     }
 
     public function update(Request $request, User $user): RedirectResponse

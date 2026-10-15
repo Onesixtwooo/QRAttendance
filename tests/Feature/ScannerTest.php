@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Booth;
+use App\Models\AttendanceRecord;
 use App\Models\EventSchedule;
 use App\Models\Student;
 use App\Models\User;
@@ -92,6 +93,105 @@ class ScannerTest extends TestCase
             'scan_type' => 'time_in',
         ]);
         $this->assertNotNull($booth->fresh()->last_seen_at);
+    }
+
+    public function test_booth_scans_time_in_then_time_out_after_admin_changes_phase(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $boothUser = User::factory()->create(['role' => 'booth']);
+        $booth = Booth::create([
+            'name' => 'Main Gate',
+            'status' => 'Online',
+            'user_id' => $boothUser->id,
+            'admin_name' => 'Gate Operator',
+            'admin_email' => 'gate@example.com',
+        ]);
+        $event = $this->activeEvent();
+        $student = Student::create([
+            'student_id' => 'STU-TWO-SCANS',
+            'last_name' => 'Santos',
+            'first_name' => 'Mika',
+            'course' => 'BSIT',
+            'block' => 'A',
+            'year_level' => '1st Year',
+        ]);
+
+        $timeIn = $this->actingAs($boothUser)->postJson(route('scanner.scan'), [
+            'payload' => $this->payloadFor($student->student_id),
+        ]);
+        $timeIn->assertOk()
+            ->assertJsonPath('record.scan_type', 'time_in')
+            ->assertJsonPath('record.student_id', $student->student_id)
+            ->assertJsonPath('record.booth', $booth->name);
+
+        $this->actingAs($admin)->patch(route('schedule.scan-phase', $event), [
+            'scan_phase' => 'time_out',
+        ])->assertRedirect(route('schedule'));
+
+        $this->travelTo('2026-07-10 08:45:00');
+        $timeOut = $this->actingAs($boothUser)->postJson(route('scanner.scan'), [
+            'payload' => $this->payloadFor($student->student_id),
+        ]);
+        $timeOut->assertOk()
+            ->assertJsonPath('record.scan_type', 'time_out')
+            ->assertJsonPath('record.student_id', $student->student_id)
+            ->assertJsonPath('record.booth', $booth->name);
+
+        $this->assertDatabaseHas('attendance_records', [
+            'event_schedule_id' => $event->id,
+            'booth_id' => $booth->id,
+            'student_id' => $student->id,
+            'scan_type' => 'time_in',
+            'scanned_at' => '2026-07-10 08:15:00',
+        ]);
+        $this->assertDatabaseHas('attendance_records', [
+            'event_schedule_id' => $event->id,
+            'booth_id' => $booth->id,
+            'student_id' => $student->id,
+            'scan_type' => 'time_out',
+            'scanned_at' => '2026-07-10 08:45:00',
+        ]);
+        $this->assertNotEquals($timeIn->json('record.id'), $timeOut->json('record.id'));
+        $this->assertDatabaseCount('attendance_records', 2);
+    }
+
+    public function test_scan_returns_conflict_if_another_request_inserts_the_same_scan_first(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $booth = Booth::create([
+            'name' => 'Main Gate', 'status' => 'Online',
+            'admin_name' => 'Gate Admin', 'admin_email' => 'gate@example.com',
+        ]);
+        $event = $this->activeEvent();
+        $student = Student::create([
+            'student_id' => 'STU-RACE', 'last_name' => 'Rivera', 'first_name' => 'Alyssa',
+            'course' => 'BSIT', 'block' => 'A', 'year_level' => '1st Year',
+        ]);
+        $insertedByOtherRequest = false;
+
+        AttendanceRecord::creating(function (AttendanceRecord $record) use (&$insertedByOtherRequest): void {
+            if ($insertedByOtherRequest) {
+                return;
+            }
+
+            $insertedByOtherRequest = true;
+            AttendanceRecord::withoutEvents(fn () => AttendanceRecord::create($record->getAttributes()));
+        });
+
+        $this->actingAs($admin)->postJson('/qr-scanner/scan', [
+            'payload' => app(StudentQrCode::class)->generate($student)['payload'],
+            'booth_id' => $booth->id,
+        ])
+            ->assertStatus(409)
+            ->assertJsonPath('message', 'This student already has a time_in scan for the current event.');
+
+        $this->assertTrue($insertedByOtherRequest);
+        $this->assertDatabaseCount('attendance_records', 1);
+        $this->assertDatabaseHas('attendance_records', [
+            'event_schedule_id' => $event->id,
+            'student_id' => $student->id,
+            'scan_type' => 'time_in',
+        ]);
     }
 
     public function test_second_scan_waits_for_admin_to_activate_verification_phase(): void
@@ -347,6 +447,43 @@ class ScannerTest extends TestCase
         ]);
     }
 
+    public function test_scanning_stops_after_event_end_unless_admin_overrides_schedule_time(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $booth = Booth::create([
+            'name' => 'Main Gate', 'status' => 'Online',
+            'admin_name' => 'Gate Admin', 'admin_email' => 'gate@example.com',
+        ]);
+        $event = $this->activeEvent();
+        $student = Student::create([
+            'student_id' => 'STU-AFTER-END', 'last_name' => 'Santos', 'first_name' => 'Mika',
+            'course' => 'BSIT', 'block' => 'A', 'year_level' => '1st Year',
+        ]);
+        $this->travelTo('2026-07-10 09:01:00');
+
+        $this->actingAs($admin)->postJson(route('scanner.scan'), [
+            'payload' => $this->payloadFor($student->student_id),
+            'booth_id' => $booth->id,
+        ])->assertStatus(422)->assertJsonPath('message', 'No event is currently in progress.');
+        $this->assertDatabaseCount('attendance_records', 0);
+
+        $this->patch(route('schedule.update', $event), [
+            'title' => $event->title,
+            'event_date' => '2026-07-10',
+            'start_time' => '08:00',
+            'end_time' => '09:00',
+            'venue' => $event->venue,
+            'status' => 'In Progress',
+            'override_schedule_time' => '1',
+        ])->assertSessionHasNoErrors();
+
+        $this->postJson(route('scanner.scan'), [
+            'payload' => $this->payloadFor($student->student_id),
+            'booth_id' => $booth->id,
+        ])->assertOk()->assertJsonPath('record.scan_type', 'time_in');
+        $this->assertDatabaseCount('attendance_records', 1);
+    }
+
     public function test_verification_phase_requires_prior_time_in(): void
     {
         $admin = User::create([
@@ -447,6 +584,21 @@ class ScannerTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJsonPath('message', 'This student QR code is invalid or has expired. Ask the student to refresh it.');
+    }
+
+    public function test_student_qr_image_is_generated_locally_as_a_png_data_uri(): void
+    {
+        $student = Student::create([
+            'student_id' => 'STU-LOCAL-QR', 'last_name' => 'Santos', 'first_name' => 'Mika',
+            'course' => 'BSIT', 'block' => 'A', 'year_level' => '1st Year',
+        ]);
+
+        $code = app(StudentQrCode::class)->generate($student);
+        $this->assertStringStartsWith('data:image/png;base64,', $code['image_url']);
+        $image = base64_decode(substr($code['image_url'], strlen('data:image/png;base64,')), true);
+        $this->assertNotFalse($image);
+        $this->assertSame('image/png', getimagesizefromstring($image)['mime']);
+        $this->assertSame($student->student_id, json_decode($code['payload'], true)['student_id']);
     }
 
     private function payloadFor(string $studentId): string

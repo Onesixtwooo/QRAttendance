@@ -7,6 +7,8 @@ use App\Models\Booth;
 use App\Models\EventSchedule;
 use App\Models\Student;
 use App\Support\StudentQrCode;
+use Carbon\CarbonImmutable;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -79,13 +81,19 @@ class ScannerController extends Controller
 
         $scanType = $scanDecision['type'];
 
-        $record = AttendanceRecord::create([
-            'event_schedule_id' => $event->id,
-            'booth_id' => $booth->id,
-            'student_id' => $student->id,
-            'scanned_at' => now(),
-            'scan_type' => $scanType,
-        ]);
+        try {
+            $record = AttendanceRecord::create([
+                'event_schedule_id' => $event->id,
+                'booth_id' => $booth->id,
+                'student_id' => $student->id,
+                'scanned_at' => now(),
+                'scan_type' => $scanType,
+            ]);
+        } catch (UniqueConstraintViolationException) {
+            return response()->json([
+                'message' => 'This student already has a '.$scanType.' scan for the current event.',
+            ], 409);
+        }
 
         return response()->json([
             'message' => match ($scanType) {
@@ -134,9 +142,18 @@ class ScannerController extends Controller
 
     private function currentEvent(): ?EventSchedule
     {
+        $now = CarbonImmutable::now(config('app.timezone'));
+
         return EventSchedule::query()
-            ->whereDate('event_date', now()->toDateString())
             ->where('status', 'In Progress')
+            ->where(function ($query) use ($now): void {
+                $query->where('override_schedule_time', true)
+                    ->orWhere(function ($scheduledEvent) use ($now): void {
+                        $scheduledEvent->whereDate('event_date', $now->toDateString())
+                            ->whereTime('end_time', '>=', $now->format('H:i:s'));
+                    });
+            })
+            ->orderByDesc('event_date')
             ->orderByDesc('start_time')
             ->first();
     }

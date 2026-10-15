@@ -8,7 +8,7 @@
         <tr>
             <td class="school-identity" rowspan="2">
                 <div class="school-identity-content">
-                    <img src="{{ asset('olshco-seal.jpg') }}" alt="OLSHCO seal">
+                    <img src="{{ $sealUrl ?? asset('olshco-seal.jpg') }}" alt="OLSHCO seal">
                     <div>
                         <strong>OLSHCO</strong>
                         <span>Our Lady of the Sacred Heart<br>College of Guimba, Inc.</span>

@@ -291,6 +291,10 @@
                                             <td class="px-5 py-4">
                                                 <div class="flex justify-end gap-2">
                                                     <a href="{{ route('users', ['edit' => $user['id']]) }}#user-form" class="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50">Edit</a>
+                                                    <form method="POST" action="{{ route('users.credentials.resend', $user['id']) }}">
+                                                        @csrf
+                                                        <button class="rounded-lg border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">Resend credentials</button>
+                                                    </form>
                                                     <form method="POST" action="{{ route('users.destroy', $user['id']) }}">
                                                         @csrf
                                                         @method('DELETE')
@@ -321,6 +325,23 @@
                     @if (session('student_status'))
                         <div class="border-b border-emerald-100 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-700">
                             {{ session('student_status') }}
+                        </div>
+                    @endif
+
+                    @if (session('student_mail_failures'))
+                        <div class="border-b border-rose-100 bg-rose-50 px-5 py-3 text-sm text-rose-800">
+                            <p class="font-semibold">Credentials could not be sent to:</p>
+                            <ul class="mt-2 space-y-2">
+                                @foreach (session('student_mail_failures') as $failure)
+                                    <li class="flex flex-wrap items-center gap-2">
+                                        <span>{{ $failure['email'] }}</span>
+                                        <form method="POST" action="{{ route('students.account.resend', $failure['id']) }}">
+                                            @csrf
+                                            <button class="rounded border border-rose-300 bg-white px-2 py-1 font-semibold hover:bg-rose-100">Resend credentials</button>
+                                        </form>
+                                    </li>
+                                @endforeach
+                            </ul>
                         </div>
                     @endif
 
@@ -780,6 +801,9 @@
                         @if (session('status'))
                             <div class="border-b border-emerald-100 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-700">
                                 {{ session('status') }}
+                                @if (session('attendance_archive_id'))
+                                    <a class="ml-2 underline" href="{{ route('schedule.archives.download', session('attendance_archive_id')) }}">Download final attendance report</a>
+                                @endif
                             </div>
                         @endif
 
@@ -803,11 +827,15 @@
                                             <p class="mt-2 text-xs font-semibold text-zinc-500">Active scan: <span class="text-zinc-800">{{ $event['scan_phase_label'] }}</span></p>
                                             <p class="mt-1 text-xs font-semibold text-zinc-500">Time-in: <span class="{{ $event['time_in_open'] ? 'text-emerald-700' : 'text-rose-700' }}">{{ $event['time_in_open'] ? 'Open' : 'Closed' }}</span></p>
                                         @endif
+                                        @if ($event['override_schedule_time'])
+                                            <p class="mt-1 text-xs font-semibold text-amber-700">Schedule override active. Edit the event to end the override.</p>
+                                        @endif
                                     </div>
                                     <div class="grid gap-3 md:col-span-2 xl:col-span-1 xl:text-right">
                                         <span class="justify-self-start rounded-full px-2 py-1 text-xs font-semibold xl:justify-self-end {{ $event['status'] === 'In Progress' ? 'bg-emerald-50 text-emerald-700' : ($event['status'] === 'Upcoming' ? 'bg-sky-50 text-sky-700' : 'bg-zinc-100 text-zinc-600') }}">{{ $event['status'] }}</span>
                                         <div class="flex flex-wrap gap-2 xl:justify-end">
                                             <a href="{{ route('schedule', ['edit' => $event['id']]) }}#edit-event-modal" class="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50">Edit</a>
+                                            <a href="{{ route('records.print', ['event_schedule_id' => $event['id']]) }}" target="_blank" class="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50">View attendance</a>
                                             @if ($event['status'] === 'In Progress')
                                                 <form method="POST" action="{{ route('schedule.scan-phase', $event['id']) }}">
                                                     @csrf
@@ -835,11 +863,7 @@
                                                     @endif
                                                 </form>
                                             @endif
-                                            <form method="POST" action="{{ route('schedule.destroy', $event['id']) }}">
-                                                @csrf
-                                                @method('DELETE')
-                                                <button class="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50">Delete</button>
-                                            </form>
+                                            <a href="{{ route('schedule.delete.confirm', $event['id']) }}" class="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50">Archive &amp; Delete</a>
                                         </div>
                                     </div>
                                 </article>
@@ -860,11 +884,7 @@
                                         <p class="text-xs text-zinc-500">{{ $event['venue'] }}</p>
                                         <div class="mt-3 flex gap-2">
                                             <a href="{{ route('schedule', ['edit' => $event['id']]) }}#event-form" class="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50">Edit</a>
-                                            <form method="POST" action="{{ route('schedule.destroy', $event['id']) }}">
-                                                @csrf
-                                                @method('DELETE')
-                                                <button class="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50">Delete</button>
-                                            </form>
+                                            <a href="{{ route('schedule.delete.confirm', $event['id']) }}" class="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50">Archive &amp; Delete</a>
                                         </div>
                                     </div>
                                 </div>
@@ -873,6 +893,25 @@
                             @endforelse
                         </div>
                     </aside>
+                </section>
+
+                <section class="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+                    <h2 class="font-bold">Final attendance archives</h2>
+                    <p class="mt-1 text-sm text-zinc-500">A copy of each event's attendance report is saved before deletion.</p>
+                    <div class="mt-4 divide-y divide-zinc-100">
+                        @forelse ($attendanceArchives as $archive)
+                            <div class="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
+                                <div>
+                                    <p class="font-semibold text-zinc-900">{{ $archive->event_title }}</p>
+                                    <p class="text-zinc-500">{{ $archive->event_date->format('F j, Y') }} · Archived {{ $archive->created_at->format('F j, Y g:i A') }}</p>
+                                </div>
+                                <a href="{{ route('schedule.archives.download', $archive) }}" class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 font-semibold text-emerald-700 hover:bg-emerald-100">Download report</a>
+                            </div>
+                        @empty
+                            <p class="py-3 text-sm text-zinc-500">No attendance reports have been archived yet.</p>
+                        @endforelse
+                    </div>
+                    <div class="mt-4">{{ $attendanceArchives->links() }}</div>
                 </section>
             @endif
 
@@ -971,6 +1010,12 @@
                         <input type="password" name="password_confirmation" placeholder="Confirm password" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm">
                         <button class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">{{ $student['account_email'] ? 'Update Login' : 'Create Login' }}</button>
                     </form>
+                    @if ($student['account_email'])
+                        <form method="POST" action="{{ route('students.account.resend', $student['id']) }}" class="border-t border-zinc-200 p-5">
+                            @csrf
+                            <button class="text-sm font-semibold text-emerald-700 hover:underline">Resend temporary credentials</button>
+                        </form>
+                    @endif
                 </div>
             </div>
         @endforeach
@@ -989,7 +1034,7 @@
                     @csrf
 
                     <div class="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
-                        Required headers: <span class="font-semibold text-zinc-800">student_id, email, last_name, first_name, course, block, year_level</span>
+                        Required headers: <span class="font-semibold text-zinc-800">student_id, email, last_name, first_name, course, block, year_level</span>. Rows without an email are skipped.
                     </div>
 
                     <label class="grid gap-1 text-sm font-semibold text-zinc-700">
@@ -1037,7 +1082,7 @@
                                 <tr>
                                     <th class="w-12 border border-zinc-300 px-3 py-2">#</th>
                                     <th class="border border-zinc-300 px-3 py-2">Student ID</th>
-                                    <th class="border border-zinc-300 px-3 py-2">Email</th>
+                                    <th class="border border-zinc-300 px-3 py-2">Email (required)</th>
                                     <th class="border border-zinc-300 px-3 py-2">Last Name</th>
                                     <th class="border border-zinc-300 px-3 py-2">First Name</th>
                                     <th class="border border-zinc-300 px-3 py-2">Course</th>
@@ -1100,17 +1145,8 @@
         <div id="bulk-student-progress" class="fixed inset-0 z-[60] hidden place-items-center bg-zinc-950/60 p-4" role="status" aria-live="polite">
             <div class="w-full max-w-md rounded-xl bg-white p-6 text-center shadow-2xl">
                 <div class="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-emerald-100 border-t-emerald-600"></div>
-                <h2 class="mt-5 text-lg font-bold text-zinc-900">Sending login credentials</h2>
-                <p id="bulk-student-progress-message" class="mt-2 text-sm text-zinc-600">Preparing student accounts...</p>
-                <div class="mt-5 h-2 overflow-hidden rounded-full bg-zinc-100">
-                    <div id="bulk-student-progress-bar" class="h-full w-0 rounded-full bg-emerald-600 transition-all duration-500"></div>
-                </div>
-                <p id="bulk-student-progress-remaining" class="mt-3 text-xs font-semibold text-zinc-500"></p>
-                <div class="mt-4 text-left">
-                    <p class="text-[11px] font-bold uppercase tracking-wide text-zinc-400">Credential queue</p>
-                    <ol id="bulk-student-progress-list" class="mt-2 max-h-40 space-y-1 overflow-y-auto rounded-lg bg-zinc-50 p-3 text-xs text-zinc-600"></ol>
-                </div>
-                <p class="mt-4 text-xs text-zinc-400">Please keep this page open until the batch is complete.</p>
+                <h2 class="mt-5 text-lg font-bold text-zinc-900">Saving students and sending credentials</h2>
+                <p class="mt-2 text-sm text-zinc-600">Please wait. Email send results will appear after this request finishes.</p>
             </div>
         </div>
 
@@ -1257,6 +1293,13 @@
                             </select>
                             @error('status') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
                         </label>
+
+                        <label class="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 lg:col-span-2">
+                            <input type="hidden" name="override_schedule_time" value="0">
+                            <input type="checkbox" name="override_schedule_time" value="1" @checked(old('override_schedule_time', $editEvent->override_schedule_time)) class="mt-1 rounded border-amber-300">
+                            <span><strong>Override schedule time</strong><br><span class="font-normal">With status In Progress, keep this event open for scanning even after its scheduled end. Set the status to Completed and uncheck this when finished.</span></span>
+                        </label>
+                        @error('override_schedule_time') <span class="text-xs text-rose-600 lg:col-span-2">{{ $message }}</span> @enderror
 
                         <label class="grid gap-1 text-sm font-semibold text-zinc-700">
                             Start Time
@@ -1464,7 +1507,6 @@
     @endif
 
     @if ($page === 'scanner')
-        <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
         <script>
             const scanEndpoint = '{{ route('scanner.scan') }}';
             const scannerHasActiveEvent = @json((bool) $scannerCurrentEvent);
@@ -1876,11 +1918,6 @@
 
             const bulkStudentForm = bulkStudentRows?.closest('form');
             const bulkStudentProgress = document.getElementById('bulk-student-progress');
-            const bulkStudentProgressMessage = document.getElementById('bulk-student-progress-message');
-            const bulkStudentProgressRemaining = document.getElementById('bulk-student-progress-remaining');
-            const bulkStudentProgressBar = document.getElementById('bulk-student-progress-bar');
-            const bulkStudentProgressList = document.getElementById('bulk-student-progress-list');
-            let bulkStudentProgressTimer = null;
             let bulkStudentSubmitStarted = false;
 
             bulkStudentForm?.addEventListener('submit', (event) => {
@@ -1891,82 +1928,8 @@
 
                 bulkStudentSubmitStarted = true;
                 bulkStudentForm.querySelector('button[type="submit"]')?.setAttribute('disabled', 'disabled');
-                const credentialRows = Array.from(bulkStudentRows.querySelectorAll('.bulk-student-row'))
-                    .map((row) => ({
-                        name: [
-                            row.querySelector('[name$="[first_name]"]')?.value.trim(),
-                            row.querySelector('[name$="[last_name]"]')?.value.trim(),
-                        ].filter(Boolean).join(' '),
-                        email: row.querySelector('[name$="[email]"]')?.value.trim(),
-                    }))
-                    .filter((row) => row.email);
-
-                const total = credentialRows.length;
-                let completed = 0;
-
                 bulkStudentProgress?.classList.remove('hidden');
                 bulkStudentProgress?.classList.add('grid');
-                bulkStudentProgressList.replaceChildren(...credentialRows.map((row, index) => {
-                    const item = document.createElement('li');
-                    item.dataset.queueIndex = String(index);
-                    item.className = 'flex items-start gap-2';
-                    item.innerHTML = '<span class="mt-0.5 text-zinc-300">○</span><span></span>';
-                    item.querySelector('span:last-child').textContent = row.name
-                        ? `${row.name} · ${row.email}`
-                        : row.email;
-                    return item;
-                }));
-
-                if (! total) {
-                    bulkStudentProgressMessage.textContent = 'Saving student records...';
-                    bulkStudentProgressRemaining.textContent = 'No email credentials to send.';
-                    bulkStudentProgressBar.style.width = '100%';
-                    return;
-                }
-
-                const updateProgress = () => {
-                    const current = credentialRows[Math.min(completed, total - 1)];
-                    const remaining = Math.max(total - completed, 0);
-                    const progress = Math.min((completed / total) * 100, 95);
-
-                    bulkStudentProgressMessage.textContent = completed >= total
-                        ? 'Finishing batch and confirming delivery...'
-                        : current.name
-                            ? `Processing ${current.name} (${completed + 1} of ${total})`
-                            : `Processing account ${completed + 1} of ${total}`;
-                    bulkStudentProgressRemaining.textContent = `${remaining} credential${remaining === 1 ? '' : 's'} remaining`;
-                    bulkStudentProgressBar.style.width = `${progress}%`;
-
-                    bulkStudentProgressList.querySelectorAll('li').forEach((item, index) => {
-                        const marker = item.querySelector('span');
-                        const text = item.querySelector('span:last-child');
-
-                        if (index < completed) {
-                            marker.textContent = '✓';
-                            marker.className = 'mt-0.5 text-emerald-600';
-                            text.className = 'text-zinc-400 line-through';
-                        } else if (index === completed) {
-                            marker.textContent = '→';
-                            marker.className = 'mt-0.5 font-bold text-emerald-600';
-                            text.className = 'font-semibold text-zinc-800';
-                        } else {
-                            marker.textContent = '○';
-                            marker.className = 'mt-0.5 text-zinc-300';
-                            text.className = 'text-zinc-600';
-                        }
-                    });
-                };
-
-                updateProgress();
-                bulkStudentProgressTimer = window.setInterval(() => {
-                    completed = Math.min(completed + 1, total);
-                    updateProgress();
-
-                    if (completed >= total) {
-                        window.clearInterval(bulkStudentProgressTimer);
-                        bulkStudentProgressBar.style.width = '95%';
-                    }
-                }, 700);
             });
         </script>
     @endif

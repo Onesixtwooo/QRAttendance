@@ -4,6 +4,8 @@ namespace App\Support;
 
 use App\Models\Student;
 use Carbon\CarbonImmutable;
+use Endroid\QrCode\QrCode;
+use Endroid\QrCode\Writer\PngWriter;
 
 class StudentQrCode
 {
@@ -20,12 +22,13 @@ class StudentQrCode
             'expires_at' => $expiresAt,
             'signature' => $signature,
         ], JSON_UNESCAPED_SLASHES);
+        $imageUrl = (new PngWriter())->write(new QrCode(data: $payload, size: 320))->getDataUri();
 
         return [
             'payload' => $payload,
             'expires_at' => $expiresAt,
             'verification_code' => strtoupper(substr($signature, 0, 8)),
-            'image_url' => 'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data='.urlencode($payload),
+            'image_url' => $imageUrl,
         ];
     }
 

@@ -347,7 +347,9 @@
             <p class="muted">{{ $groupLabel }}</p>
         </div>
         <div class="actions">
-            <a class="button" href="{{ route('records', $backFilters) }}">Back</a>
+            @unless ($archiveMode ?? false)
+                <a class="button" href="{{ route('records', $backFilters) }}">Back</a>
+            @endunless
             <button class="button primary" type="button" onclick="window.print()">Print Attendance</button>
         </div>
     </header>

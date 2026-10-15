@@ -2,7 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Models\AttendanceRecord;
+use App\Models\Booth;
+use App\Models\EventAttendanceArchive;
 use App\Models\EventSchedule;
+use App\Models\Student;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -130,8 +134,8 @@ class EventScheduleTest extends TestCase
         $response->assertSee('In Progress');
         $response->assertSee('Scheduled');
         $response->assertSee('Cancelled');
-        $response->assertSee('Scan phase');
-        $response->assertSee('Activate Verification');
+        $response->assertSee('Active scan:');
+        $response->assertSee('Activate Time-out');
         $response->assertSee('Close Time-in');
 
         $this->assertDatabaseHas('event_schedules', [
@@ -175,8 +179,8 @@ class EventScheduleTest extends TestCase
 
         $response->assertOk();
         $response->assertSee('Future Orientation');
-        $response->assertDontSee('Scan phase:');
-        $response->assertDontSee('Activate Verification');
+        $response->assertDontSee('Active scan:');
+        $response->assertDontSee('Activate Time-out');
         $response->assertDontSee('Open Time-in');
         $response->assertDontSee('Close Time-in');
 
@@ -240,6 +244,61 @@ class EventScheduleTest extends TestCase
         $response->assertSessionHasNoErrors();
     }
 
+    public function test_completed_event_can_be_reopened_with_an_explicit_schedule_override(): void
+    {
+        Carbon::setTestNow('2026-07-11 09:00:00');
+
+        try {
+            $event = EventSchedule::create([
+                'title' => 'Past Orientation',
+                'event_date' => '2026-07-08',
+                'start_time' => '08:00',
+                'end_time' => '12:00',
+                'venue' => 'Gym',
+                'booth' => 'Not assigned',
+                'status' => 'Completed',
+            ]);
+
+            $details = [
+                'title' => $event->title,
+                'event_date' => '2026-07-08',
+                'start_time' => '08:00',
+                'end_time' => '12:00',
+                'venue' => 'Gym',
+                'status' => 'In Progress',
+            ];
+
+            $this->patch(route('schedule.update', $event), $details)
+                ->assertSessionHasErrors('override_schedule_time');
+
+            $this->patch(route('schedule.update', $event), $details + ['override_schedule_time' => '1'])
+                ->assertRedirect(route('schedule'))
+                ->assertSessionHasNoErrors();
+
+            $this->get(route('schedule'))
+                ->assertSee('Schedule override active');
+            $this->get(route('scanner'))
+                ->assertSee('Past Orientation');
+            $this->assertDatabaseHas('event_schedules', [
+                'id' => $event->id,
+                'status' => 'In Progress',
+                'override_schedule_time' => true,
+            ]);
+
+            $this->patch(route('schedule.update', $event), array_replace($details, ['status' => 'Completed']))
+                ->assertSessionHasNoErrors();
+            $this->get(route('scanner'))
+                ->assertDontSee('Past Orientation');
+            $this->assertDatabaseHas('event_schedules', [
+                'id' => $event->id,
+                'status' => 'Completed',
+                'override_schedule_time' => false,
+            ]);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     public function test_event_schedule_can_be_deleted(): void
     {
         $event = EventSchedule::create([
@@ -259,6 +318,62 @@ class EventScheduleTest extends TestCase
         $this->assertDatabaseMissing('event_schedules', [
             'id' => $event->id,
         ]);
+        $this->assertDatabaseHas('event_attendance_archives', [
+            'original_event_id' => $event->id,
+            'event_title' => $event->title,
+        ]);
+    }
+
+    public function test_deleting_an_event_archives_its_final_attendance_report(): void
+    {
+        $event = EventSchedule::create([
+            'title' => 'Final Orientation', 'event_date' => '2026-07-08',
+            'start_time' => '08:00', 'end_time' => '12:00',
+            'venue' => 'Gym', 'booth' => 'Main Gate', 'status' => 'Completed',
+        ]);
+        $booth = Booth::create([
+            'name' => 'Main Gate', 'status' => 'Offline',
+            'admin_name' => 'Gate Admin', 'admin_email' => 'gate@example.com',
+        ]);
+        $student = Student::create([
+            'student_id' => 'STU-ARCHIVE', 'last_name' => 'Santos', 'first_name' => 'Mika',
+            'course' => 'BSIT', 'block' => 'A', 'year_level' => '1st Year',
+        ]);
+        $record = AttendanceRecord::create([
+            'event_schedule_id' => $event->id, 'booth_id' => $booth->id,
+            'student_id' => $student->id, 'scanned_at' => '2026-07-08 08:15:00',
+            'scan_type' => 'time_in',
+        ]);
+
+        $this->get(route('schedule.delete.confirm', $event))
+            ->assertOk()
+            ->assertSee('Download current report')
+            ->assertSee('1 scan record(s)');
+        $this->get(route('schedule.report.download', $event))
+            ->assertOk()
+            ->assertHeader('Content-Disposition', 'attachment; filename="attendance-event-'.$event->id.'-2026-07-08.html"')
+            ->assertSee('Mika Santos');
+        $this->assertDatabaseHas('event_schedules', ['id' => $event->id]);
+
+        $this->delete(route('schedule.destroy', $event))
+            ->assertRedirect(route('schedule'))
+            ->assertSessionHas('status', 'Event deleted. Its final attendance report was archived.');
+
+        $archive = EventAttendanceArchive::where('original_event_id', $event->id)->firstOrFail();
+        $this->assertDatabaseMissing('event_schedules', ['id' => $event->id]);
+        $this->assertNull($record->fresh()->event_schedule_id);
+        $this->assertStringContainsString('Final Orientation', $archive->report_html);
+        $this->assertStringContainsString('Mika Santos', $archive->report_html);
+        $this->assertStringContainsString('data:image/jpeg;base64,', $archive->report_html);
+
+        $this->get(route('schedule.archives.download', $archive))
+            ->assertOk()
+            ->assertHeader('Content-Disposition', 'attachment; filename="attendance-event-'.$event->id.'-2026-07-08.html"')
+            ->assertSee('Mika Santos');
+
+        $this->get(route('schedule'))
+            ->assertSee('Final attendance archives')
+            ->assertSee(route('schedule.archives.download', $archive));
     }
 
     public function test_event_scan_phase_can_be_updated(): void
@@ -277,19 +392,19 @@ class EventScheduleTest extends TestCase
         ]);
 
         $response = $this->patch('/event-schedule/'.$event->id.'/scan-phase', [
-            'scan_phase' => 'verification',
+            'scan_phase' => 'time_out',
         ]);
 
         $response->assertRedirect('/event-schedule');
         $this->assertDatabaseHas('event_schedules', [
             'id' => $event->id,
-            'scan_phase' => 'verification',
+            'scan_phase' => 'time_out',
         ]);
 
         $page = $this->get('/event-schedule');
 
         $page->assertOk();
-        $page->assertSee('Cancel Verification');
+        $page->assertSee('Reopen Time-in');
 
         $cancelResponse = $this->patch('/event-schedule/'.$event->id.'/scan-phase', [
             'scan_phase' => 'time_in',

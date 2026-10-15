@@ -9,6 +9,7 @@ use App\Mail\AdminAccountCredentials;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use RuntimeException;
 use Tests\TestCase;
 
 class UserPageTest extends TestCase
@@ -62,6 +63,8 @@ class UserPageTest extends TestCase
         $response->assertDontSee('STU-1001');
         $response->assertSee('Active');
         $response->assertSee('Edit');
+        $response->assertSee('Resend credentials');
+        $response->assertDontSee('action="'.route('users.credentials.resend', $studentUser->id).'"', false);
         $response->assertSee('Delete');
         $response->assertSee('href="#add-admin-modal"', false);
         $response->assertSee('Create Admin');
@@ -90,6 +93,79 @@ class UserPageTest extends TestCase
                 && $mail->user->is($user)
                 && Hash::check($mail->temporaryPassword, $user->password);
         });
+    }
+
+    public function test_admin_credentials_can_be_resent_with_a_new_password(): void
+    {
+        config(['mail.default' => 'smtp']);
+        $admin = User::factory()->create(['role' => 'admin', 'email' => 'admin@example.com']);
+        $previousPassword = $admin->password;
+        Mail::fake();
+
+        $this->post(route('users.credentials.resend', $admin))
+            ->assertRedirect(route('users'))
+            ->assertSessionHas('user_status', 'New admin credentials submitted to the configured mail transport for admin@example.com.');
+
+        $this->assertNotSame($previousPassword, $admin->fresh()->password);
+        Mail::assertSent(AdminAccountCredentials::class, function (AdminAccountCredentials $mail) use ($admin): bool {
+            return $mail->hasTo('admin@example.com')
+                && $mail->user->is($admin)
+                && Hash::check($mail->temporaryPassword, $admin->fresh()->password);
+        });
+    }
+
+    public function test_failed_admin_resend_keeps_the_existing_password(): void
+    {
+        config(['mail.default' => 'smtp']);
+        $admin = User::factory()->create(['role' => 'admin', 'email' => 'admin@example.com']);
+        $previousPassword = $admin->password;
+        Mail::shouldReceive('to')->once()->andThrow(new RuntimeException('Mail unavailable'));
+
+        $this->post(route('users.credentials.resend', $admin))
+            ->assertSessionHas('user_status', 'Admin credentials could not be sent to admin@example.com. The existing password still works. Check the mail settings and try again.');
+
+        $this->assertSame($previousPassword, $admin->fresh()->password);
+    }
+
+    public function test_admin_resend_does_not_reset_a_password_when_mail_uses_the_log(): void
+    {
+        config(['mail.default' => 'log']);
+        $admin = User::factory()->create(['role' => 'admin']);
+        $previousPassword = $admin->password;
+        Mail::fake();
+
+        $this->post(route('users.credentials.resend', $admin))
+            ->assertSessionHas('user_status', 'Mail is configured for logging. Configure an email transport before resending admin credentials.');
+
+        $this->assertSame($previousPassword, $admin->fresh()->password);
+        Mail::assertNothingSent();
+    }
+
+    public function test_admin_resend_rejects_a_student_account(): void
+    {
+        config(['mail.default' => 'smtp']);
+        $student = User::factory()->create(['role' => 'student']);
+        $previousPassword = $student->password;
+        Mail::fake();
+
+        $this->post(route('users.credentials.resend', $student))->assertNotFound();
+
+        $this->assertSame($previousPassword, $student->fresh()->password);
+        Mail::assertNothingSent();
+    }
+
+    public function test_student_cannot_resend_admin_credentials(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $student = User::factory()->create(['role' => 'student']);
+        $previousPassword = $admin->password;
+        Mail::fake();
+
+        $this->actingAs($student)->post(route('users.credentials.resend', $admin))
+            ->assertRedirect(route('student.portal'));
+
+        $this->assertSame($previousPassword, $admin->fresh()->password);
+        Mail::assertNothingSent();
     }
 
     public function test_user_can_be_loaded_for_editing(): void

@@ -14,7 +14,7 @@ class PortalAuthenticationTest extends TestCase
     {
         $this->get('/login')->assertOk()->assertSee('Sign in')
             ->assertSee('name="email"', false)->assertSee('name="password"', false)
-            ->assertSee(route('register'));
+            ->assertDontSee('Create an account');
     }
 
     public function test_active_user_can_login_with_a_password(): void
@@ -80,16 +80,15 @@ class PortalAuthenticationTest extends TestCase
         $this->assertAuthenticatedAs($user);
     }
 
-    public function test_student_can_register_and_is_sent_to_the_student_portal(): void
+    public function test_public_student_registration_is_unavailable(): void
     {
         $this->post('/register', [
             'name' => 'Maya Dela Cruz', 'email' => 'maya@example.com',
             'password' => 'secret-password', 'password_confirmation' => 'secret-password',
-        ])->assertRedirect(route('student.portal'));
+        ])->assertNotFound();
 
-        $user = User::where('email', 'maya@example.com')->firstOrFail();
-        $this->assertSame('student', $user->role);
-        $this->assertAuthenticatedAs($user);
+        $this->assertDatabaseMissing('users', ['email' => 'maya@example.com']);
+        $this->assertGuest();
     }
 
     public function test_logout_ends_the_local_session_and_returns_to_login(): void

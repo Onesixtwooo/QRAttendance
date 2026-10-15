@@ -19,6 +19,7 @@ class EventSchedule extends Model
         'venue',
         'booth',
         'status',
+        'override_schedule_time',
         'scan_phase',
         'time_in_open',
     ];
@@ -37,6 +38,7 @@ class EventSchedule extends Model
         return [
             'event_date' => 'date',
             'time_in_open' => 'boolean',
+            'override_schedule_time' => 'boolean',
         ];
     }
 

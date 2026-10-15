@@ -4,8 +4,12 @@ namespace Tests\Feature;
 
 use App\Models\Student;
 use App\Models\User;
+use App\Mail\StudentAccountCredentials;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
+use RuntimeException;
 use Tests\TestCase;
 
 class StudentPageTest extends TestCase
@@ -31,8 +35,8 @@ class StudentPageTest extends TestCase
         $response->assertSee('Year Level');
         $response->assertSee('Select year level');
         $response->assertSee('5th Year');
-        $response->assertDontSee('href="#add-student-modal"', false);
-        $response->assertDontSee('href="#import-students-modal"', false);
+        $response->assertSee('href="#add-student-modal"', false);
+        $response->assertSee('href="#import-students-modal"', false);
         $response->assertDontSee('>Export<', false);
         $response->assertDontSee('>Add Record<', false);
         $response->assertSee('Import Students');
@@ -73,8 +77,10 @@ class StudentPageTest extends TestCase
 
     public function test_student_can_be_saved_to_the_database(): void
     {
+        Mail::fake();
         $response = $this->post('/students', [
             'student_id' => 'STU-25001',
+            'email' => 'maya@example.com',
             'last_name' => 'Dela Cruz',
             'first_name' => 'Maya',
             'course' => 'BS Information Systems',
@@ -96,8 +102,10 @@ class StudentPageTest extends TestCase
 
     public function test_student_can_be_saved_without_a_block(): void
     {
+        Mail::fake();
         $response = $this->post('/students', [
             'student_id' => 'STU-25002',
+            'email' => 'mika@example.com',
             'last_name' => 'Santos',
             'first_name' => 'Mika',
             'course' => 'BS Information Systems',
@@ -113,26 +121,144 @@ class StudentPageTest extends TestCase
         ]);
     }
 
+    public function test_student_without_email_is_not_saved(): void
+    {
+        Mail::fake();
+
+        $this->post('/students', [
+            'student_id' => 'STU-NO-EMAIL',
+            'last_name' => 'Davis',
+            'first_name' => 'John',
+            'course' => 'BSIT',
+            'year_level' => '1st Year',
+        ])->assertSessionHasErrors('email');
+
+        $this->assertDatabaseMissing('students', ['student_id' => 'STU-NO-EMAIL']);
+        Mail::assertNothingSent();
+    }
+
+    public function test_single_creation_reports_failed_credential_delivery(): void
+    {
+        config(['mail.default' => 'smtp']);
+        Mail::shouldReceive('to')->once()->andThrow(new RuntimeException('Mail unavailable'));
+
+        $response = $this->post('/students', [
+            'student_id' => 'STU-FAILED-MAIL', 'email' => 'failed@example.com',
+            'last_name' => 'Davis', 'first_name' => 'John', 'course' => 'BSIT',
+            'year_level' => '1st Year',
+        ]);
+
+        $student = Student::where('student_id', 'STU-FAILED-MAIL')->firstOrFail();
+        $response->assertSessionHas('student_status', 'Student saved, but credentials could not be sent. Check the mail settings and resend them.');
+        $response->assertSessionHas('student_mail_failures', [['id' => $student->id, 'email' => 'failed@example.com']]);
+        $this->get('/students')->assertSee('Resend credentials');
+    }
+
     public function test_multiple_students_can_be_saved_from_the_spreadsheet(): void
     {
+        config(['mail.default' => 'log']);
+        Mail::fake();
         $response = $this->post('/students/bulk', [
             'students' => [
-                ['student_id' => 'STU-GRID-1', 'last_name' => 'Davis', 'first_name' => 'John', 'course' => 'BSIT', 'block' => 'A', 'year_level' => '1st Year'],
-                ['student_id' => 'STU-GRID-2', 'last_name' => 'Santos', 'first_name' => 'Mika', 'course' => 'BSCS', 'block' => 'B', 'year_level' => '2nd Year'],
+                ['student_id' => 'STU-GRID-1', 'email' => 'john@example.com', 'last_name' => 'Davis', 'first_name' => 'John', 'course' => 'BSIT', 'block' => 'A', 'year_level' => '1st Year'],
+                ['student_id' => 'STU-GRID-2', 'email' => 'mika@example.com', 'last_name' => 'Santos', 'first_name' => 'Mika', 'course' => 'BSCS', 'block' => 'B', 'year_level' => '2nd Year'],
             ],
         ]);
 
         $response->assertRedirect('/students');
-        $response->assertSessionHas('student_status', 'Added 2 student record(s).');
+        $response->assertSessionHas('student_status', 'Added 2 student record(s). 2 email(s) written to the mail log (not emailed).');
         $this->assertDatabaseHas('students', ['student_id' => 'STU-GRID-1']);
         $this->assertDatabaseHas('students', ['student_id' => 'STU-GRID-2']);
     }
 
+    public function test_bulk_creation_reports_successful_mail_handoff(): void
+    {
+        config(['mail.default' => 'smtp']);
+        Mail::fake();
+
+        $response = $this->post('/students/bulk', [
+            'students' => [[
+                'student_id' => 'STU-MAIL-1', 'email' => 'student@example.com',
+                'last_name' => 'Davis', 'first_name' => 'John', 'course' => 'BSIT',
+                'block' => 'A', 'year_level' => '1st Year',
+            ]],
+        ]);
+
+        $response->assertSessionHas('student_status', 'Added 1 student record(s). 1 email(s) submitted to the configured mail transport.');
+        $response->assertSessionHas('student_mail_failures', []);
+        Mail::assertSent(StudentAccountCredentials::class, 1);
+    }
+
+    public function test_bulk_creation_reports_failed_mail(): void
+    {
+        config(['mail.default' => 'smtp']);
+        Mail::shouldReceive('to')->once()->andThrow(new RuntimeException('Mail unavailable'));
+
+        $response = $this->post('/students/bulk', [
+            'students' => [[
+                'student_id' => 'STU-MAIL-2', 'email' => 'failed@example.com',
+                'last_name' => 'Davis', 'first_name' => 'Jane', 'course' => 'BSIT',
+                'block' => 'A', 'year_level' => '1st Year',
+            ]],
+        ]);
+
+        $student = Student::where('student_id', 'STU-MAIL-2')->firstOrFail();
+        $response->assertSessionHas('student_status', 'Added 1 student record(s). 0 email(s) submitted to the configured mail transport; 1 failed.');
+        $response->assertSessionHas('student_mail_failures', [['id' => $student->id, 'email' => 'failed@example.com']]);
+        $this->assertNotNull($student->user);
+        $this->get('/students')
+            ->assertSee('Credentials could not be sent to:')
+            ->assertSee('failed@example.com')
+            ->assertSee(route('students.account.resend', $student));
+    }
+
+    public function test_admin_can_resend_student_credentials_with_a_new_password(): void
+    {
+        config(['mail.default' => 'smtp']);
+        $student = Student::create([
+            'student_id' => 'STU-RESEND', 'last_name' => 'Davis', 'first_name' => 'Jane',
+            'course' => 'BSIT', 'block' => 'A', 'year_level' => '1st Year',
+        ]);
+        $user = User::factory()->create(['email' => 'failed@example.com', 'role' => 'student']);
+        $student->user()->associate($user);
+        $student->save();
+
+        $oldPassword = $user->password;
+        Mail::fake();
+        $this->post(route('students.account.resend', $student))->assertRedirect(route('students'));
+        Mail::assertSent(StudentAccountCredentials::class, function (StudentAccountCredentials $mail) use ($student, $oldPassword): bool {
+            return $mail->hasTo('failed@example.com')
+                && $mail->student->is($student)
+                && Hash::check($mail->temporaryPassword, $student->user->fresh()->password)
+                && $oldPassword !== $student->user->fresh()->password;
+        });
+    }
+
+    public function test_failed_resend_preserves_the_existing_password(): void
+    {
+        config(['mail.default' => 'smtp']);
+        $student = Student::create([
+            'student_id' => 'STU-FAILED-RESEND', 'last_name' => 'Davis', 'first_name' => 'Jane',
+            'course' => 'BSIT', 'block' => 'A', 'year_level' => '1st Year',
+        ]);
+        $user = User::factory()->create(['email' => 'existing@example.com', 'role' => 'student']);
+        $student->user()->associate($user);
+        $student->save();
+        $previousPassword = $user->password;
+        Mail::shouldReceive('to')->once()->andThrow(new RuntimeException('Mail unavailable'));
+
+        $this->post(route('students.account.resend', $student))
+            ->assertSessionHas('student_status', 'Credentials could not be sent to existing@example.com. The existing password still works. Check the mail settings and try again.');
+
+        $this->assertSame($previousPassword, $user->fresh()->password);
+    }
+
     public function test_student_can_be_saved_from_the_spreadsheet_without_a_block(): void
     {
+        Mail::fake();
         $response = $this->post('/students/bulk', [
             'students' => [
-                ['student_id' => 'STU-NO-BLOCK', 'last_name' => 'Davis', 'first_name' => 'John', 'course' => 'BSIT', 'block' => '', 'year_level' => '1st Year'],
+                ['student_id' => 'STU-NO-BLOCK', 'email' => 'john@example.com', 'last_name' => 'Davis', 'first_name' => 'John', 'course' => 'BSIT', 'block' => '', 'year_level' => '1st Year'],
             ],
         ]);
 
@@ -149,14 +275,30 @@ class StudentPageTest extends TestCase
 
         $response = $this->from('/students#add-student-modal')->post('/students/bulk', [
             'students' => [
-                ['student_id' => 'STU-NEW', 'last_name' => 'New', 'first_name' => 'Student', 'course' => 'BSIT', 'block' => 'A', 'year_level' => '1st Year'],
-                ['student_id' => 'STU-EXISTS', 'last_name' => 'Duplicate', 'first_name' => 'Student', 'course' => 'BSIT', 'block' => 'A', 'year_level' => '1st Year'],
+                ['student_id' => 'STU-NEW', 'email' => 'new@example.com', 'last_name' => 'New', 'first_name' => 'Student', 'course' => 'BSIT', 'block' => 'A', 'year_level' => '1st Year'],
+                ['student_id' => 'STU-EXISTS', 'email' => 'existing@example.com', 'last_name' => 'Duplicate', 'first_name' => 'Student', 'course' => 'BSIT', 'block' => 'A', 'year_level' => '1st Year'],
             ],
         ]);
 
         $response->assertRedirect('/students#add-student-modal');
         $response->assertSessionHasErrors('students.1.student_id', null, 'bulkStudents');
         $this->assertDatabaseMissing('students', ['student_id' => 'STU-NEW']);
+    }
+
+    public function test_spreadsheet_rejects_the_entire_batch_when_a_student_has_no_email(): void
+    {
+        Mail::fake();
+
+        $this->post('/students/bulk', [
+            'students' => [
+                ['student_id' => 'STU-WITH-EMAIL', 'email' => 'student@example.com', 'last_name' => 'Davis', 'first_name' => 'John', 'course' => 'BSIT', 'year_level' => '1st Year'],
+                ['student_id' => 'STU-NO-EMAIL', 'last_name' => 'Santos', 'first_name' => 'Mika', 'course' => 'BSCS', 'year_level' => '2nd Year'],
+            ],
+        ])->assertSessionHasErrors('students.1.email', null, 'bulkStudents');
+
+        $this->assertDatabaseMissing('students', ['student_id' => 'STU-WITH-EMAIL']);
+        $this->assertDatabaseMissing('students', ['student_id' => 'STU-NO-EMAIL']);
+        Mail::assertNothingSent();
     }
 
     public function test_student_can_be_loaded_for_editing(): void
@@ -275,10 +417,11 @@ class StudentPageTest extends TestCase
 
     public function test_students_can_be_imported_from_csv(): void
     {
+        Mail::fake();
         $csv = implode("\n", [
-            'student_id,last_name,first_name,course,block,year_level',
-            'STU-26001,Santos,Mika,BS Information Systems,A,1st Year',
-            'STU-26002,Ramos,Noah,BS Computer Science,B,2nd Year',
+            'student_id,email,last_name,first_name,course,block,year_level',
+            'STU-26001,mika@example.com,Santos,Mika,BS Information Systems,A,1st Year',
+            'STU-26002,noah@example.com,Ramos,Noah,BS Computer Science,B,2nd Year',
         ]);
 
         $response = $this->post('/students/import', [
@@ -304,6 +447,135 @@ class StudentPageTest extends TestCase
             'block' => 'B',
             'year_level' => '2nd Year',
         ]);
+    }
+
+    public function test_import_skips_a_student_without_email(): void
+    {
+        Mail::fake();
+        $csv = implode("\n", [
+            'student_id,email,last_name,first_name,course,block,year_level',
+            'STU-VALID,valid@example.com,Santos,Mika,BSIT,A,1st Year',
+            'STU-NO-EMAIL,,Ramos,Noah,BSCS,B,2nd Year',
+        ]);
+
+        $this->post('/students/import', [
+            'student_file' => UploadedFile::fake()->createWithContent('students.csv', $csv),
+        ])->assertSessionHas('student_status', 'Imported 1 student record(s). Skipped 1 row(s). 1 email(s) submitted to the configured mail transport.');
+
+        $this->assertDatabaseHas('students', ['student_id' => 'STU-VALID']);
+        $this->assertDatabaseMissing('students', ['student_id' => 'STU-NO-EMAIL']);
+        Mail::assertSent(StudentAccountCredentials::class, 1);
+    }
+
+    public function test_import_skips_email_owned_by_an_admin_without_changing_that_account(): void
+    {
+        $admin = User::factory()->create(['email' => 'admin@example.com', 'role' => 'admin']);
+        $oldPassword = $admin->password;
+        Mail::fake();
+        $csv = implode("\n", [
+            'student_id,email,last_name,first_name,course,block,year_level',
+            'STU-ADMIN,admin@example.com,Davis,John,BSIT,A,1st Year',
+        ]);
+
+        $this->post('/students/import', [
+            'student_file' => UploadedFile::fake()->createWithContent('students.csv', $csv),
+        ])->assertSessionHas('student_status', 'Imported 0 student record(s). Skipped 1 row(s). 0 email(s) submitted to the configured mail transport.');
+
+        $this->assertDatabaseMissing('students', ['student_id' => 'STU-ADMIN']);
+        $this->assertSame('admin', $admin->fresh()->role);
+        $this->assertSame($oldPassword, $admin->fresh()->password);
+        Mail::assertNothingSent();
+    }
+
+    public function test_reimport_updates_student_without_resetting_an_unchanged_account(): void
+    {
+        $student = Student::create([
+            'student_id' => 'STU-REIMPORT', 'last_name' => 'Davis', 'first_name' => 'John',
+            'course' => 'BSIT', 'block' => 'A', 'year_level' => '1st Year',
+        ]);
+        $user = User::factory()->create(['email' => 'student@example.com', 'role' => 'student']);
+        $student->user()->associate($user);
+        $student->save();
+        $oldPassword = $user->password;
+        Mail::fake();
+        $csv = implode("\n", [
+            'student_id,email,last_name,first_name,course,block,year_level',
+            'STU-REIMPORT,student@example.com,Santos,John,BSCS,B,2nd Year',
+        ]);
+
+        $this->post('/students/import', [
+            'student_file' => UploadedFile::fake()->createWithContent('students.csv', $csv),
+        ])->assertSessionHas('student_status', 'Imported 1 student record(s). Skipped 0 row(s). 0 email(s) submitted to the configured mail transport.');
+
+        $this->assertDatabaseHas('students', ['id' => $student->id, 'last_name' => 'Santos', 'course' => 'BSCS', 'block' => 'B']);
+        $this->assertSame($oldPassword, $user->fresh()->password);
+        Mail::assertNothingSent();
+    }
+
+    public function test_import_cannot_assign_another_students_email(): void
+    {
+        $other = Student::create([
+            'student_id' => 'STU-OTHER', 'last_name' => 'Davis', 'first_name' => 'Jane',
+            'course' => 'BSIT', 'block' => 'A', 'year_level' => '1st Year',
+        ]);
+        $user = User::factory()->create(['email' => 'taken@example.com', 'role' => 'student']);
+        $other->user()->associate($user);
+        $other->save();
+        Mail::fake();
+        $csv = implode("\n", [
+            'student_id,email,last_name,first_name,course,block,year_level',
+            'STU-NEW,taken@example.com,Santos,Mika,BSCS,B,2nd Year',
+        ]);
+
+        $this->post('/students/import', [
+            'student_file' => UploadedFile::fake()->createWithContent('students.csv', $csv),
+        ])->assertSessionHas('student_status', 'Imported 0 student record(s). Skipped 1 row(s). 0 email(s) submitted to the configured mail transport.');
+
+        $this->assertDatabaseMissing('students', ['student_id' => 'STU-NEW']);
+        $this->assertSame($user->id, $other->fresh()->user_id);
+        Mail::assertNothingSent();
+    }
+
+    public function test_failed_reimport_preserves_existing_password(): void
+    {
+        $student = Student::create([
+            'student_id' => 'STU-UPDATE-EMAIL', 'last_name' => 'Davis', 'first_name' => 'John',
+            'course' => 'BSIT', 'block' => 'A', 'year_level' => '1st Year',
+        ]);
+        $user = User::factory()->create(['email' => 'old@example.com', 'role' => 'student']);
+        $student->user()->associate($user);
+        $student->save();
+        $oldPassword = $user->password;
+        config(['mail.default' => 'smtp']);
+        Mail::shouldReceive('to')->once()->andThrow(new RuntimeException('Mail unavailable'));
+        $csv = implode("\n", [
+            'student_id,email,last_name,first_name,course,block,year_level',
+            'STU-UPDATE-EMAIL,new@example.com,Davis,John,BSIT,A,1st Year',
+        ]);
+
+        $this->post('/students/import', [
+            'student_file' => UploadedFile::fake()->createWithContent('students.csv', $csv),
+        ])->assertSessionHas('student_mail_failures', [['id' => $student->id, 'email' => 'new@example.com']]);
+
+        $this->assertSame($oldPassword, $user->fresh()->password);
+    }
+
+    public function test_import_reports_failed_credential_delivery(): void
+    {
+        config(['mail.default' => 'smtp']);
+        Mail::shouldReceive('to')->once()->andThrow(new RuntimeException('Mail unavailable'));
+        $csv = implode("\n", [
+            'student_id,email,last_name,first_name,course,block,year_level',
+            'STU-IMPORT-FAILED,failed@example.com,Santos,Mika,BSIT,A,1st Year',
+        ]);
+
+        $response = $this->post('/students/import', [
+            'student_file' => UploadedFile::fake()->createWithContent('students.csv', $csv),
+        ]);
+
+        $student = Student::where('student_id', 'STU-IMPORT-FAILED')->firstOrFail();
+        $response->assertSessionHas('student_status', 'Imported 1 student record(s). Skipped 0 row(s). 0 email(s) submitted to the configured mail transport; 1 failed.');
+        $response->assertSessionHas('student_mail_failures', [['id' => $student->id, 'email' => 'failed@example.com']]);
     }
 
     public function test_students_can_be_filtered_by_course_block_and_year_level(): void
@@ -366,7 +638,7 @@ class StudentPageTest extends TestCase
         $response->assertDontSee('Print QR');
     }
 
-    public function test_student_rows_show_account_link_status_without_qr_controls(): void
+    public function test_student_rows_show_account_link_status_and_qr_code(): void
     {
         $student = Student::create([
             'student_id' => 'STU-29001',
@@ -387,8 +659,8 @@ class StudentPageTest extends TestCase
         $response->assertSee('Student Details');
         $response->assertSee('Information Technology');
         $response->assertSee('4th Year');
-        $response->assertSee('No account linked');
-        $response->assertDontSee('Student QR');
+        $response->assertSee('Current status:');
+        $response->assertSee('Attendance QR Code');
         $response->assertDontSee('Print QR');
     }
 }

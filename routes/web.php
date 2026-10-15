@@ -28,6 +28,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
     Route::get('/users', [UserController::class, 'index'])->name('users');
     Route::post('/users', [UserController::class, 'store'])->name('users.store');
+    Route::post('/users/{user}/credentials/resend', [UserController::class, 'resendCredentials'])->name('users.credentials.resend');
     Route::patch('/users/{user}', [UserController::class, 'update'])->name('users.update');
     Route::delete('/users/{user}', [UserController::class, 'destroy'])->name('users.destroy');
     Route::get('/students', [StudentController::class, 'index'])->name('students');
@@ -35,6 +36,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/students', [StudentController::class, 'store'])->name('students.store');
     Route::post('/students/bulk', [StudentController::class, 'storeBulk'])->name('students.store-bulk');
     Route::post('/students/{student}/account', [StudentController::class, 'saveAccount'])->name('students.account');
+    Route::post('/students/{student}/account/resend', [StudentController::class, 'resendCredentials'])->name('students.account.resend');
     Route::post('/students/import', [StudentController::class, 'import'])->name('students.import');
     Route::delete('/students/bulk', [StudentController::class, 'destroySelected'])->name('students.destroy-selected');
     Route::patch('/students/{student}', [StudentController::class, 'update'])->name('students.update');
@@ -47,6 +49,9 @@ Route::middleware('auth')->group(function () {
     Route::patch('/attendance-records/{attendanceRecord}', [AttendanceRecordController::class, 'update'])->name('records.update');
     Route::delete('/attendance-records/{attendanceRecord}', [AttendanceRecordController::class, 'destroy'])->name('records.destroy');
     Route::get('/event-schedule', [EventScheduleController::class, 'index'])->name('schedule');
+    Route::get('/event-schedule/{eventSchedule}/delete', [EventScheduleController::class, 'confirmDelete'])->name('schedule.delete.confirm');
+    Route::get('/event-schedule/{eventSchedule}/final-report', [EventScheduleController::class, 'downloadCurrentReport'])->name('schedule.report.download');
+    Route::get('/event-attendance-archives/{archive}/download', [EventScheduleController::class, 'downloadArchive'])->name('schedule.archives.download');
     Route::post('/event-schedule', [EventScheduleController::class, 'store'])->name('schedule.store');
     Route::patch('/event-schedule/{eventSchedule}', [EventScheduleController::class, 'update'])->name('schedule.update');
     Route::patch('/event-schedule/{eventSchedule}/scan-phase', [EventScheduleController::class, 'updateScanPhase'])->name('schedule.scan-phase');

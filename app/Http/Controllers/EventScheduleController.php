@@ -2,10 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\EventAttendanceArchive;
 use App\Models\EventSchedule;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class EventScheduleController extends Controller
@@ -28,6 +33,10 @@ class EventScheduleController extends Controller
             'page' => 'schedule',
             'events' => $events,
             'editEvent' => $editEvent,
+            'attendanceArchives' => EventAttendanceArchive::query()
+                ->select(['id', 'original_event_id', 'event_title', 'event_date', 'created_at'])
+                ->latest()
+                ->paginate(10, ['*'], 'archives_page'),
         ]);
     }
 
@@ -42,20 +51,101 @@ class EventScheduleController extends Controller
 
     public function update(Request $request, EventSchedule $eventSchedule): RedirectResponse
     {
-        $eventSchedule->update($this->validated($request));
+        abort_unless($request->user()->role === 'admin', 403);
+
+        $data = $this->validated($request);
+        $override = $request->boolean('override_schedule_time');
+
+        if ($override && $data['status'] !== 'In Progress') {
+            throw ValidationException::withMessages([
+                'override_schedule_time' => 'Select In Progress to override the schedule time.',
+            ]);
+        }
+
+        $endsAt = CarbonImmutable::parse($data['event_date'].' '.$data['end_time'], config('app.timezone'));
+        if ($data['status'] === 'In Progress' && ! $override && $endsAt->isPast()) {
+            throw ValidationException::withMessages([
+                'override_schedule_time' => 'This event has ended. Enable the schedule override to reopen it.',
+            ]);
+        }
+
+        $data['override_schedule_time'] = $override;
+        $eventSchedule->update($data);
 
         return redirect()
             ->route('schedule')
             ->with('status', 'Event schedule updated.');
     }
 
-    public function destroy(EventSchedule $eventSchedule): RedirectResponse
+    public function confirmDelete(Request $request, EventSchedule $eventSchedule): View
     {
-        $eventSchedule->delete();
+        abort_unless($request->user()->role === 'admin', 403);
+
+        return view('schedule.confirm-delete', [
+            'event' => $eventSchedule,
+            'scanCount' => $eventSchedule->attendanceRecords()->count(),
+        ]);
+    }
+
+    public function downloadCurrentReport(Request $request, EventSchedule $eventSchedule, AttendanceRecordController $attendanceRecords): Response
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+
+        $html = $this->renderFinalReport($eventSchedule, $attendanceRecords);
+        $filename = 'attendance-event-'.$eventSchedule->id.'-'.$eventSchedule->event_date->format('Y-m-d').'.html';
+
+        return response($html, 200, [
+            'Content-Type' => 'text/html; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    public function destroy(Request $request, EventSchedule $eventSchedule, AttendanceRecordController $attendanceRecords): RedirectResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+
+        $archive = DB::transaction(function () use ($eventSchedule, $attendanceRecords): EventAttendanceArchive {
+            $html = $this->renderFinalReport($eventSchedule, $attendanceRecords);
+
+            $archive = EventAttendanceArchive::create([
+                'original_event_id' => $eventSchedule->id,
+                'event_title' => $eventSchedule->title,
+                'event_date' => $eventSchedule->event_date,
+                'report_html' => $html,
+            ]);
+
+            $eventSchedule->delete();
+
+            return $archive;
+        });
 
         return redirect()
             ->route('schedule')
-            ->with('status', 'Event schedule deleted.');
+            ->with('status', 'Event deleted. Its final attendance report was archived.')
+            ->with('attendance_archive_id', $archive->id);
+    }
+
+    public function downloadArchive(Request $request, EventAttendanceArchive $archive): Response
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+
+        $filename = 'attendance-event-'.$archive->original_event_id.'-'.$archive->event_date->format('Y-m-d').'.html';
+
+        return response($archive->report_html, 200, [
+            'Content-Type' => 'text/html; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    private function renderFinalReport(EventSchedule $event, AttendanceRecordController $attendanceRecords): string
+    {
+        $seal = 'data:image/jpeg;base64,'.base64_encode(File::get(public_path('olshco-seal.jpg')));
+
+        return $attendanceRecords->printForEvent($event)
+            ->with('sealUrl', $seal)
+            ->render();
     }
 
     public function updateScanPhase(Request $request, EventSchedule $eventSchedule): RedirectResponse
@@ -132,6 +222,7 @@ class EventScheduleController extends Controller
                 : EventSchedule::PHASE_TIME_OUT,
             'scan_phase_label' => $event->scanPhaseLabel(),
             'time_in_open' => $event->time_in_open ?? true,
+            'override_schedule_time' => $event->override_schedule_time,
         ];
     }
 
@@ -139,6 +230,10 @@ class EventScheduleController extends Controller
     {
         if ($event->status === 'Cancelled') {
             return $event->status;
+        }
+
+        if ($event->status === 'In Progress' && $event->override_schedule_time) {
+            return 'In Progress';
         }
 
         $now = CarbonImmutable::now(config('app.timezone'));

@@ -89,18 +89,20 @@ class StudentController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $data = $request->validate(array_merge($this->studentRules(), [
-            'email' => ['nullable', 'email', 'max:255', Rule::unique('users', 'email')],
+            'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')],
         ]));
-        $email = $data['email'] ?? null;
+        $email = $data['email'];
         unset($data['email']);
         $student = Student::create($data);
-        if (filled($email)) {
-            $this->provisionAndNotify($student, $email);
-        }
+        $sent = $this->provisionAndNotify($student, $email);
+        $status = $sent
+            ? 'Student saved. '.$this->credentialDeliveryStatus(1).'.'
+            : 'Student saved, but credentials could not be sent. Check the mail settings and resend them.';
 
         return redirect()
             ->route('students')
-            ->with('student_status', 'Student saved.');
+            ->with('student_status', $status)
+            ->with('student_mail_failures', $sent ? [] : [['id' => $student->id, 'email' => $email]]);
     }
 
     public function storeBulk(Request $request): RedirectResponse
@@ -114,7 +116,7 @@ class StudentController extends Controller
         $data = $request->validateWithBag('bulkStudents', [
             'students' => ['required', 'array', 'min:1', 'max:100'],
             'students.*.student_id' => ['required', 'string', 'max:50', 'distinct', Rule::unique('students', 'student_id')],
-            'students.*.email' => ['nullable', 'email', 'max:255', 'distinct', Rule::unique('users', 'email')],
+            'students.*.email' => ['required', 'email', 'max:255', 'distinct', Rule::unique('users', 'email')],
             'students.*.last_name' => ['required', 'string', 'max:255'],
             'students.*.first_name' => ['required', 'string', 'max:255'],
             'students.*.course' => ['required', 'string', 'max:255'],
@@ -122,22 +124,62 @@ class StudentController extends Controller
             'students.*.year_level' => ['required', Rule::in(['1st Year', '2nd Year', '3rd Year', '4th Year', '5th Year'])],
         ]);
 
-        DB::transaction(function () use ($data): void {
+        $credentials = DB::transaction(function () use ($data): array {
+            $credentials = [];
             foreach ($data['students'] as $studentData) {
-                $email = $studentData['email'] ?? null;
+                $email = $studentData['email'];
                 unset($studentData['email']);
                 $student = Student::create($studentData);
-                if (filled($email)) {
-                    $this->provisionAndNotify($student, $email);
-                }
+                $credentials[] = [$student, $this->provisionStudentAccount($student, $email)];
             }
+
+            return $credentials;
         });
 
         $count = count($data['students']);
+        $sent = 0;
+        $failed = [];
+
+        foreach ($credentials as [$student, $password]) {
+            if ($this->sendStudentCredentials($student, $password)) {
+                $sent++;
+            } else {
+                $failed[] = ['id' => $student->id, 'email' => $student->user->email];
+            }
+        }
+
+        $mailResult = $this->credentialDeliveryStatus($sent);
+        if ($failed !== []) {
+            $mailResult .= '; '.count($failed).' failed';
+        }
 
         return redirect()
             ->route('students')
-            ->with('student_status', "Added {$count} student record(s).");
+            ->with('student_status', "Added {$count} student record(s). {$mailResult}.")
+            ->with('student_mail_failures', $failed);
+    }
+
+    public function resendCredentials(Request $request, Student $student): RedirectResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+        abort_unless($student->user?->role === 'student', 404);
+
+        if (config('mail.default') === 'log') {
+            return redirect()->route('students')->with('student_status', 'Mail is configured for logging. Configure an email transport before resending credentials.');
+        }
+
+        $password = str()->random(12);
+        $previousPassword = $student->user->password;
+        $student->user->update(['password' => $password]);
+
+        if ($this->sendStudentCredentials($student, $password)) {
+            $status = 'Credentials submitted to the configured mail transport for '.$student->user->email.'.';
+        } else {
+            $student->user->update(['password' => $previousPassword]);
+            $status = 'Credentials could not be sent to '.$student->user->email.'. The existing password still works. Check the mail settings and try again.';
+        }
+
+        return redirect()->route('students')->with('student_status', $status);
     }
 
     public function update(Request $request, Student $student): RedirectResponse
@@ -210,6 +252,8 @@ class StudentController extends Controller
         $headers = $this->normalizeHeaders(array_shift($rows));
         $imported = 0;
         $skipped = 0;
+        $sent = 0;
+        $failed = [];
 
         foreach ($rows as $row) {
             $data = $this->mapStudentRow($headers, $row);
@@ -218,7 +262,10 @@ class StudentController extends Controller
                 continue;
             }
 
-            $validator = Validator::make($data, $this->studentRules());
+            $existingStudent = Student::with('user')->where('student_id', $data['student_id'])->first();
+            $validator = Validator::make($data, array_merge($this->studentRules($existingStudent), [
+                'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($existingStudent?->user)],
+            ]));
 
             if ($validator->fails()) {
                 $skipped++;
@@ -226,21 +273,31 @@ class StudentController extends Controller
                 continue;
             }
 
-            $student = Student::updateOrCreate(
-                ['student_id' => $data['student_id']],
-                $validator->validated()
-            );
+            $validated = $validator->validated();
+            $email = $validated['email'];
+            unset($validated['email']);
+            $student = Student::updateOrCreate(['student_id' => $validated['student_id']], $validated);
 
-            if (filled($data['email'])) {
-                $this->provisionAndNotify($student, $data['email']);
+            if (! $student->user || $student->user->email !== $email) {
+                if ($this->provisionAndNotify($student, $email)) {
+                    $sent++;
+                } else {
+                    $failed[] = ['id' => $student->id, 'email' => $email];
+                }
             }
 
             $imported++;
         }
 
+        $status = "Imported {$imported} student record(s). Skipped {$skipped} row(s). ".$this->credentialDeliveryStatus($sent);
+        if ($failed !== []) {
+            $status .= '; '.count($failed).' failed';
+        }
+
         return redirect()
             ->route('students')
-            ->with('student_status', "Imported {$imported} student record(s). Skipped {$skipped} row(s).");
+            ->with('student_status', $status.'.')
+            ->with('student_mail_failures', $failed);
     }
 
     private function validated(Request $request, ?Student $student = null): array
@@ -311,10 +368,32 @@ class StudentController extends Controller
         ];
     }
 
-    private function provisionAndNotify(Student $student, string $email): void
+    private function provisionAndNotify(Student $student, string $email): bool
+    {
+        $previousPassword = $student->user?->password;
+        $password = $this->provisionStudentAccount($student, $email);
+        if ($this->sendStudentCredentials($student, $password)) {
+            return true;
+        }
+
+        if ($previousPassword !== null) {
+            $student->user->update(['password' => $previousPassword]);
+        }
+
+        return false;
+    }
+
+    private function credentialDeliveryStatus(int $sent): string
+    {
+        return config('mail.default') === 'log'
+            ? "{$sent} email(s) written to the mail log (not emailed)"
+            : "{$sent} email(s) submitted to the configured mail transport";
+    }
+
+    private function provisionStudentAccount(Student $student, string $email): string
     {
         $temporaryPassword = str()->random(12);
-        $user = $student->user ?? User::firstOrNew(['email' => $email]);
+        $user = $student->user ?? new User;
         $user->name = trim($student->first_name.' '.$student->last_name);
         $user->email = $email;
         $user->password = Hash::make($temporaryPassword);
@@ -323,10 +402,20 @@ class StudentController extends Controller
         $user->save();
         $student->user()->associate($user);
         $student->save();
+
+        return $temporaryPassword;
+    }
+
+    private function sendStudentCredentials(Student $student, string $temporaryPassword): bool
+    {
         try {
-            Mail::to($email)->send(new StudentAccountCredentials($student->load('user'), $temporaryPassword));
-        } catch (Throwable) {
-            // Keep the saved account usable even if the SMTP server is temporarily unavailable.
+            Mail::to($student->user->email)->send(new StudentAccountCredentials($student->load('user'), $temporaryPassword));
+
+            return true;
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return false;
         }
     }
 

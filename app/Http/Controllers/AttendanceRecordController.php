@@ -57,6 +57,22 @@ class AttendanceRecordController extends Controller
             $filters['event_schedule_id'] = $this->defaultEvent($filters)?->id;
         }
 
+        return $this->printWithFilters($filters);
+    }
+
+    public function printForEvent(EventSchedule $event): View
+    {
+        return $this->printWithFilters([
+            'date' => null,
+            'event_schedule_id' => $event->id,
+            'course' => null,
+            'block' => null,
+            'year_level' => null,
+        ])->with('archiveMode', true);
+    }
+
+    private function printWithFilters(array $filters): View
+    {
         $event = filled($filters['event_schedule_id'])
             ? EventSchedule::find($filters['event_schedule_id'])
             : null;
