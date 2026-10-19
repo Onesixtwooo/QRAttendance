@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Http\Middleware\RedirectBoothUsersToScanner;
 use App\Models\Student;
 use App\Models\User;
 use App\Mail\StudentAccountCredentials;
@@ -11,6 +12,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use RuntimeException;
 use Tests\TestCase;
+use ZipArchive;
 
 class StudentPageTest extends TestCase
 {
@@ -447,6 +449,64 @@ class StudentPageTest extends TestCase
             'block' => 'B',
             'year_level' => '2nd Year',
         ]);
+    }
+
+    public function test_xlsx_import_keeps_columns_aligned_when_a_cell_is_blank(): void
+    {
+        Mail::fake();
+        $path = tempnam(sys_get_temp_dir(), 'student-import-');
+        $zip = new ZipArchive;
+        $this->assertTrue($zip->open($path, ZipArchive::OVERWRITE) === true);
+        $zip->addFromString('xl/worksheets/sheet1.xml', '<?xml version="1.0" encoding="UTF-8"?>'
+            .'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
+            .'<row r="1"><c r="A1" t="inlineStr"><is><t>student_id</t></is></c><c r="B1" t="inlineStr"><is><t>email</t></is></c><c r="C1" t="inlineStr"><is><t>last_name</t></is></c><c r="D1" t="inlineStr"><is><t>first_name</t></is></c><c r="E1" t="inlineStr"><is><t>course</t></is></c><c r="F1" t="inlineStr"><is><t>block</t></is></c><c r="G1" t="inlineStr"><is><t>year_level</t></is></c></row>'
+            .'<row r="2"><c r="A2" t="inlineStr"><is><t>STU-XLSX</t></is></c><c r="B2" t="inlineStr"><is><t>xlsx@example.com</t></is></c><c r="C2" t="inlineStr"><is><t>Rivera</t></is></c><c r="D2" t="inlineStr"><is><t>Ana</t></is></c><c r="E2" t="inlineStr"><is><t>BSIT</t></is></c><c r="G2" t="inlineStr"><is><t>2nd Year</t></is></c></row>'
+            .'</sheetData></worksheet>');
+        $zip->close();
+
+        try {
+            $response = $this->post('/students/import', [
+                'student_file' => UploadedFile::fake()->createWithContent('students.xlsx', file_get_contents($path)),
+            ]);
+        } finally {
+            unlink($path);
+        }
+
+        $response->assertRedirect('/students');
+        $response->assertSessionHas('student_status', 'Imported 1 student record(s). Skipped 0 row(s). 1 email(s) submitted to the configured mail transport.');
+        $this->assertDatabaseHas('students', ['student_id' => 'STU-XLSX', 'block' => '', 'year_level' => '2nd Year']);
+    }
+
+    public function test_import_rejects_missing_required_headers(): void
+    {
+        Mail::fake();
+        $csv = implode("\n", [
+            'student_id,last_name,first_name,course,block,year_level',
+            'STU-NO-HEADER,Rivera,Ana,BSIT,A,2nd Year',
+        ]);
+
+        $this->post('/students/import', [
+            'student_file' => UploadedFile::fake()->createWithContent('students.csv', $csv),
+        ])->assertSessionHas('student_import_error', 'Missing required headers: email.');
+
+        $this->assertDatabaseMissing('students', ['student_id' => 'STU-NO-HEADER']);
+        Mail::assertNothingSent();
+    }
+
+    public function test_non_admin_cannot_import_students(): void
+    {
+        $this->withoutMiddleware(RedirectBoothUsersToScanner::class);
+        $this->actingAs(User::factory()->create(['role' => 'student']));
+        $csv = implode("\n", [
+            'student_id,email,last_name,first_name,course,block,year_level',
+            'STU-UNAUTHORIZED,student@example.com,Rivera,Ana,BSIT,A,2nd Year',
+        ]);
+
+        $this->post('/students/import', [
+            'student_file' => UploadedFile::fake()->createWithContent('students.csv', $csv),
+        ])->assertForbidden();
+
+        $this->assertDatabaseMissing('students', ['student_id' => 'STU-UNAUTHORIZED']);
     }
 
     public function test_import_skips_a_student_without_email(): void

@@ -234,12 +234,14 @@ class StudentController extends Controller
 
     public function import(Request $request): RedirectResponse
     {
+        abort_unless($request->user()->role === 'admin', 403);
+
         $request->validate([
             'student_file' => ['required', 'file', 'mimes:csv,txt,xlsx', 'max:5120'],
         ]);
 
         $file = $request->file('student_file');
-        $rows = $file->getClientOriginalExtension() === 'xlsx'
+        $rows = strtolower($file->getClientOriginalExtension()) === 'xlsx'
             ? $this->readXlsx($file->getRealPath())
             : $this->readCsv($file->getRealPath());
 
@@ -250,6 +252,20 @@ class StudentController extends Controller
         }
 
         $headers = $this->normalizeHeaders(array_shift($rows));
+        $missingHeaders = [];
+
+        foreach ($this->studentImportAliases() as $field => $aliases) {
+            if (array_intersect($aliases, $headers) === []) {
+                $missingHeaders[] = $field;
+            }
+        }
+
+        if ($missingHeaders !== []) {
+            return redirect()
+                ->route('students')
+                ->with('student_import_error', 'Missing required headers: '.implode(', ', $missingHeaders).'.');
+        }
+
         $imported = 0;
         $skipped = 0;
         $sent = 0;
@@ -475,8 +491,10 @@ class StudentController extends Controller
                 $row[$columnIndex] = trim($value);
             }
 
-            ksort($row);
-            $rows[] = array_values($row);
+            if ($row !== []) {
+                $columnCount = max(array_keys($row)) + 1;
+                $rows[] = array_replace(array_fill(0, $columnCount, ''), $row);
+            }
         }
 
         return $rows;
@@ -537,15 +555,7 @@ class StudentController extends Controller
 
     private function mapStudentRow(array $headers, array $row): array
     {
-        $aliases = [
-            'student_id' => ['student_id', 'studentid', 'student_number', 'id_number'],
-            'email' => ['email', 'email_address'],
-            'last_name' => ['last_name', 'lastname', 'surname'],
-            'first_name' => ['first_name', 'firstname', 'given_name'],
-            'course' => ['course', 'program'],
-            'block' => ['block', 'section'],
-            'year_level' => ['year_level', 'yearlevel', 'year'],
-        ];
+        $aliases = $this->studentImportAliases();
 
         $data = [];
 
@@ -563,5 +573,18 @@ class StudentController extends Controller
         }
 
         return $data;
+    }
+
+    private function studentImportAliases(): array
+    {
+        return [
+            'student_id' => ['student_id', 'studentid', 'student_number', 'id_number'],
+            'email' => ['email', 'email_address'],
+            'last_name' => ['last_name', 'lastname', 'surname'],
+            'first_name' => ['first_name', 'firstname', 'given_name'],
+            'course' => ['course', 'program'],
+            'block' => ['block', 'section'],
+            'year_level' => ['year_level', 'yearlevel', 'year'],
+        ];
     }
 }
