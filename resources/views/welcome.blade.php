@@ -802,7 +802,7 @@
                             <div class="border-b border-emerald-100 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-700">
                                 {{ session('status') }}
                                 @if (session('attendance_archive_id'))
-                                    <a class="ml-2 underline" href="{{ route('schedule.archives.download', session('attendance_archive_id')) }}">Download final attendance report</a>
+                                    <a class="ml-2 underline" href="{{ route('schedule.archives.download', session('attendance_archive_id')) }}" data-loading-skip>Download final attendance report</a>
                                 @endif
                             </div>
                         @endif
@@ -905,7 +905,7 @@
                                     <p class="font-semibold text-zinc-900">{{ $archive->event_title }}</p>
                                     <p class="text-zinc-500">{{ $archive->event_date->format('F j, Y') }} · Archived {{ $archive->created_at->format('F j, Y g:i A') }}</p>
                                 </div>
-                                <a href="{{ route('schedule.archives.download', $archive) }}" class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 font-semibold text-emerald-700 hover:bg-emerald-100">Download report</a>
+                                <a href="{{ route('schedule.archives.download', $archive) }}" data-loading-skip class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 font-semibold text-emerald-700 hover:bg-emerald-100">Download report</a>
                             </div>
                         @empty
                             <p class="py-3 text-sm text-zinc-500">No attendance reports have been archived yet.</p>
@@ -1030,7 +1030,7 @@
                     <a href="{{ route('students') }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50">Close</a>
                 </div>
 
-                <form method="POST" action="{{ route('students.import') }}" enctype="multipart/form-data" class="grid gap-4 p-5">
+                <form id="student-import-form" method="POST" action="{{ route('students.import') }}" data-prepare-url="{{ route('students.import.prepare') }}" data-progress-url="{{ route('students.import.progress') }}" enctype="multipart/form-data" class="grid gap-4 p-5">
                     @csrf
 
                     <div class="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
@@ -1043,8 +1043,16 @@
                         @error('student_file') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
                     </label>
 
+                    <div id="student-import-progress" class="hidden rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm" role="status" aria-live="polite">
+                        <p id="student-import-stage" class="font-semibold text-emerald-900">Preparing import…</p>
+                        <progress id="student-import-bar" class="mt-3 h-3 w-full accent-emerald-600" value="0" max="100"></progress>
+                        <p id="student-import-counts" class="mt-2 text-emerald-900">0 rows processed</p>
+                        <ul id="student-import-recent" class="mt-3 max-h-36 space-y-1 overflow-auto text-zinc-700"></ul>
+                    </div>
+                    <p id="student-import-client-error" class="hidden rounded-lg bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700" role="alert"></p>
+
                     <div class="flex flex-wrap items-center gap-3">
-                        <button class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Import Records</button>
+                        <button id="student-import-submit" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Import Records</button>
                         <a href="{{ route('students') }}" class="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50">Cancel</a>
                     </div>
                 </form>

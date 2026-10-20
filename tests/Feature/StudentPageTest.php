@@ -10,6 +10,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 use Tests\TestCase;
 use ZipArchive;
@@ -467,6 +468,35 @@ class StudentPageTest extends TestCase
             'student_id' => 'STU-26003',
             'last_name' => 'Fariñas',
         ]);
+    }
+
+    public function test_csv_import_reports_actual_progress_across_batches(): void
+    {
+        Mail::fake();
+        Storage::fake('local');
+        $rows = ['student_id,email,last_name,first_name,course,block,year_level'];
+        for ($index = 1; $index <= 12; $index++) {
+            $rows[] = "STU-{$index},student{$index}@example.com,Fari\xF1as,Student,BSIT,B,1st Year";
+        }
+
+        $prepared = $this->postJson('/students/import/prepare', [
+            'student_file' => UploadedFile::fake()->createWithContent('students.csv', implode("\n", $rows)),
+        ])->assertOk()->assertJsonPath('total', 12);
+        $token = $prepared->json('token');
+
+        $this->postJson('/students/import/progress', ['token' => $token])
+            ->assertOk()
+            ->assertJsonPath('processed', 10)
+            ->assertJsonPath('imported', 10)
+            ->assertJsonPath('complete', false);
+
+        $this->postJson('/students/import/progress', ['token' => $token])
+            ->assertOk()
+            ->assertJsonPath('processed', 12)
+            ->assertJsonPath('imported', 12)
+            ->assertJsonPath('complete', true);
+
+        $this->assertDatabaseHas('students', ['student_id' => 'STU-12', 'last_name' => 'Fariñas']);
     }
 
     public function test_xlsx_import_keeps_columns_aligned_when_a_cell_is_blank(): void

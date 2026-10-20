@@ -25,3 +25,43 @@
     /* Existing dark primary surfaces use the deepest green shade. */
     --color-zinc-950: #064e3b;
 }
+
+.app-loading-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: none;
+    place-items: center;
+    background: rgb(6 78 59 / 55%);
+    padding: 1rem;
+}
+
+.app-loading-overlay.is-visible { display: grid; }
+
+.app-loading-card {
+    display: grid;
+    justify-items: center;
+    gap: .9rem;
+    min-width: 220px;
+    padding: 2rem;
+    border-radius: .75rem;
+    background: white;
+    color: #064e3b;
+    font-weight: 700;
+    box-shadow: 0 20px 40px rgb(0 0 0 / 18%);
+}
+
+.app-loading-spinner {
+    width: 2.5rem;
+    height: 2.5rem;
+    border: 4px solid #d1fae5;
+    border-top-color: #059669;
+    border-radius: 50%;
+    animation: app-loading-spin .8s linear infinite;
+}
+
+@keyframes app-loading-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+    .app-loading-spinner { animation-duration: 2s; }
+}

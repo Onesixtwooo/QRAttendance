@@ -12,7 +12,9 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Throwable;
@@ -236,34 +238,10 @@ class StudentController extends Controller
     {
         abort_unless($request->user()->role === 'admin', 403);
 
-        $request->validate([
-            'student_file' => ['required', 'file', 'mimes:csv,txt,xlsx', 'max:5120'],
-        ]);
+        [$headers, $rows, $error] = $this->uploadedStudentRows($request);
 
-        $file = $request->file('student_file');
-        $rows = strtolower($file->getClientOriginalExtension()) === 'xlsx'
-            ? $this->readXlsx($file->getRealPath())
-            : $this->readCsv($file->getRealPath());
-
-        if (count($rows) < 2) {
-            return redirect()
-                ->route('students')
-                ->with('student_import_error', 'Import file must include a header row and at least one student row.');
-        }
-
-        $headers = $this->normalizeHeaders(array_shift($rows));
-        $missingHeaders = [];
-
-        foreach ($this->studentImportAliases() as $field => $aliases) {
-            if (array_intersect($aliases, $headers) === []) {
-                $missingHeaders[] = $field;
-            }
-        }
-
-        if ($missingHeaders !== []) {
-            return redirect()
-                ->route('students')
-                ->with('student_import_error', 'Missing required headers: '.implode(', ', $missingHeaders).'.');
+        if ($error !== null) {
+            return redirect()->route('students')->with('student_import_error', $error);
         }
 
         $imported = 0;
@@ -272,37 +250,13 @@ class StudentController extends Controller
         $failed = [];
 
         foreach ($rows as $row) {
-            $data = $this->mapStudentRow($headers, $row);
-
-            if (count(array_filter($data, fn ($value) => $value !== null && $value !== '')) === 0) {
-                continue;
+            $result = $this->importStudentRow($headers, $row);
+            $imported += (int) ($result['status'] === 'imported');
+            $skipped += (int) ($result['status'] === 'skipped');
+            $sent += (int) $result['sent'];
+            if ($result['failure'] !== null) {
+                $failed[] = $result['failure'];
             }
-
-            $existingStudent = Student::with('user')->where('student_id', $data['student_id'])->first();
-            $validator = Validator::make($data, array_merge($this->studentRules($existingStudent), [
-                'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($existingStudent?->user)],
-            ]));
-
-            if ($validator->fails()) {
-                $skipped++;
-
-                continue;
-            }
-
-            $validated = $validator->validated();
-            $email = $validated['email'];
-            unset($validated['email']);
-            $student = Student::updateOrCreate(['student_id' => $validated['student_id']], $validated);
-
-            if (! $student->user || $student->user->email !== $email) {
-                if ($this->provisionAndNotify($student, $email)) {
-                    $sent++;
-                } else {
-                    $failed[] = ['id' => $student->id, 'email' => $email];
-                }
-            }
-
-            $imported++;
         }
 
         $status = "Imported {$imported} student record(s). Skipped {$skipped} row(s). ".$this->credentialDeliveryStatus($sent);
@@ -314,6 +268,156 @@ class StudentController extends Controller
             ->route('students')
             ->with('student_status', $status.'.')
             ->with('student_mail_failures', $failed);
+    }
+
+    public function prepareImport(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+
+        [$headers, $rows, $error] = $this->uploadedStudentRows($request);
+        if ($error !== null) {
+            return response()->json(['message' => $error], 422);
+        }
+
+        $token = (string) Str::uuid();
+        foreach (Storage::disk('local')->files('student-imports') as $oldPath) {
+            if (Storage::disk('local')->lastModified($oldPath) < time() - 3600) {
+                Storage::disk('local')->delete($oldPath);
+            }
+        }
+        Storage::disk('local')->put("student-imports/{$token}.json", json_encode([
+            'user_id' => $request->user()->id,
+            'created_at' => time(),
+            'headers' => $headers,
+            'rows' => $rows,
+            'next' => 0,
+            'imported' => 0,
+            'skipped' => 0,
+            'sent' => 0,
+            'failed' => [],
+        ], JSON_THROW_ON_ERROR));
+
+        return response()->json(['token' => $token, 'total' => count($rows)]);
+    }
+
+    public function processImport(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+        $data = $request->validate(['token' => ['required', 'uuid']]);
+        $path = "student-imports/{$data['token']}.json";
+        abort_unless(Storage::disk('local')->exists($path), 404);
+
+        $handle = fopen(Storage::disk('local')->path($path), 'r+');
+        abort_unless($handle !== false, 500);
+        flock($handle, LOCK_EX);
+
+        try {
+            $state = json_decode(stream_get_contents($handle), true, 512, JSON_THROW_ON_ERROR);
+            abort_unless($state['user_id'] === $request->user()->id, 403);
+            abort_if($state['created_at'] < time() - 3600, 410, 'Import expired. Please upload the file again.');
+
+            $recent = [];
+            $end = min($state['next'] + 10, count($state['rows']));
+            while ($state['next'] < $end) {
+                $row = $state['rows'][$state['next']];
+                $result = $this->importStudentRow($state['headers'], $row);
+                $state['next']++;
+                $state['imported'] += (int) ($result['status'] === 'imported');
+                $state['skipped'] += (int) ($result['status'] === 'skipped');
+                $state['sent'] += (int) $result['sent'];
+                if ($result['failure'] !== null) {
+                    $state['failed'][] = $result['failure'];
+                }
+                $recent[] = [
+                    'row' => $state['next'] + 1,
+                    'student_id' => $this->mapStudentRow($state['headers'], $row)['student_id'],
+                    'status' => $result['status'],
+                ];
+            }
+
+            rewind($handle);
+            ftruncate($handle, 0);
+            fwrite($handle, json_encode($state, JSON_THROW_ON_ERROR));
+            fflush($handle);
+
+            $complete = $state['next'] === count($state['rows']);
+            if ($complete) {
+                $status = "Imported {$state['imported']} student record(s). Skipped {$state['skipped']} row(s). ".$this->credentialDeliveryStatus($state['sent']);
+                if ($state['failed'] !== []) {
+                    $status .= '; '.count($state['failed']).' failed';
+                }
+                $request->session()->flash('student_status', $status.'.');
+                $request->session()->flash('student_mail_failures', $state['failed']);
+            }
+
+            return response()->json([
+                'processed' => $state['next'],
+                'total' => count($state['rows']),
+                'imported' => $state['imported'],
+                'skipped' => $state['skipped'],
+                'mail_failures' => count($state['failed']),
+                'recent' => $recent,
+                'complete' => $complete,
+                'redirect' => $complete ? route('students') : null,
+            ]);
+        } finally {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+        }
+    }
+
+    private function uploadedStudentRows(Request $request): array
+    {
+        $request->validate(['student_file' => ['required', 'file', 'mimes:csv,txt,xlsx', 'max:5120']]);
+        $file = $request->file('student_file');
+        $rows = strtolower($file->getClientOriginalExtension()) === 'xlsx'
+            ? $this->readXlsx($file->getRealPath())
+            : $this->readCsv($file->getRealPath());
+
+        if (count($rows) < 2) {
+            return [[], [], 'Import file must include a header row and at least one student row.'];
+        }
+
+        $headers = $this->normalizeHeaders(array_shift($rows));
+        $missing = [];
+        foreach ($this->studentImportAliases() as $field => $aliases) {
+            if (array_intersect($aliases, $headers) === []) {
+                $missing[] = $field;
+            }
+        }
+
+        return [$headers, $rows, $missing === [] ? null : 'Missing required headers: '.implode(', ', $missing).'.'];
+    }
+
+    private function importStudentRow(array $headers, array $row): array
+    {
+        $data = $this->mapStudentRow($headers, $row);
+        if (count(array_filter($data, fn ($value) => $value !== null && $value !== '')) === 0) {
+            return ['status' => 'blank', 'sent' => false, 'failure' => null];
+        }
+
+        $existingStudent = Student::with('user')->where('student_id', $data['student_id'])->first();
+        $validator = Validator::make($data, array_merge($this->studentRules($existingStudent), [
+            'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($existingStudent?->user)],
+        ]));
+        if ($validator->fails()) {
+            return ['status' => 'skipped', 'sent' => false, 'failure' => null];
+        }
+
+        $validated = $validator->validated();
+        $email = $validated['email'];
+        unset($validated['email']);
+        $student = Student::updateOrCreate(['student_id' => $validated['student_id']], $validated);
+        $sent = false;
+        $failure = null;
+        if (! $student->user || $student->user->email !== $email) {
+            $sent = $this->provisionAndNotify($student, $email);
+            if (! $sent) {
+                $failure = ['id' => $student->id, 'email' => $email];
+            }
+        }
+
+        return ['status' => 'imported', 'sent' => $sent, 'failure' => $failure];
     }
 
     private function validated(Request $request, ?Student $student = null): array

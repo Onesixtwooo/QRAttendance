@@ -38,6 +38,8 @@ Route::middleware('auth')->group(function () {
     Route::post('/students/{student}/account', [StudentController::class, 'saveAccount'])->name('students.account');
     Route::post('/students/{student}/account/resend', [StudentController::class, 'resendCredentials'])->name('students.account.resend');
     Route::post('/students/import', [StudentController::class, 'import'])->name('students.import');
+    Route::post('/students/import/prepare', [StudentController::class, 'prepareImport'])->name('students.import.prepare');
+    Route::post('/students/import/progress', [StudentController::class, 'processImport'])->name('students.import.progress');
     Route::delete('/students/bulk', [StudentController::class, 'destroySelected'])->name('students.destroy-selected');
     Route::patch('/students/{student}', [StudentController::class, 'update'])->name('students.update');
     Route::delete('/students/{student}', [StudentController::class, 'destroy'])->name('students.destroy');
