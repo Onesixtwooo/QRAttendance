@@ -451,6 +451,24 @@ class StudentPageTest extends TestCase
         ]);
     }
 
+    public function test_students_can_be_imported_from_windows_encoded_csv(): void
+    {
+        Mail::fake();
+        $csv = implode("\n", [
+            'student_id,email,last_name,first_name,course,block,year_level',
+            "STU-26003,jhon@example.com,Fari\xF1as,Jhon,BSIT,B,1st Year",
+        ]);
+
+        $this->post('/students/import', [
+            'student_file' => UploadedFile::fake()->createWithContent('students.csv', $csv),
+        ])->assertRedirect('/students');
+
+        $this->assertDatabaseHas('students', [
+            'student_id' => 'STU-26003',
+            'last_name' => 'Fariñas',
+        ]);
+    }
+
     public function test_xlsx_import_keeps_columns_aligned_when_a_cell_is_blank(): void
     {
         Mail::fake();

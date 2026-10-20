@@ -441,7 +441,15 @@ class StudentController extends Controller
         $handle = fopen($path, 'rb');
 
         while (($row = fgetcsv($handle)) !== false) {
-            $rows[] = array_map(fn ($value) => trim((string) $value), $row);
+            $rows[] = array_map(function ($value) {
+                $value = (string) $value;
+
+                if (! mb_check_encoding($value, 'UTF-8')) {
+                    $value = mb_convert_encoding($value, 'UTF-8', 'Windows-1252');
+                }
+
+                return trim($value);
+            }, $row);
         }
 
         fclose($handle);
