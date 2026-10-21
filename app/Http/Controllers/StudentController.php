@@ -2,15 +2,16 @@
 
 namespace App\Http\Controllers;
 
+use App\Mail\StudentAccountCredentials;
 use App\Models\Student;
 use App\Models\User;
-use App\Mail\StudentAccountCredentials;
 use App\Support\StudentQrCode;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
@@ -366,6 +367,42 @@ class StudentController extends Controller
         }
     }
 
+    public function mailStatus(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+
+        $smtpError = $this->testImportSmtpConnection();
+        $response = [
+            'smtp' => $smtpError === null ? 'connected' : 'failed',
+            'message' => $smtpError ?? 'SMTP connection is working.',
+            'quota' => null,
+        ];
+
+        $apiKey = config('mail.brevo_api_key');
+        if (! filled($apiKey)) {
+            $response['quota'] = ['available' => false, 'message' => 'Remaining quota was not checked. BREVO_API_KEY is optional and is only needed for Brevo quota reporting.'];
+
+            return response()->json($response, $smtpError === null ? 200 : 422);
+        }
+
+        try {
+            $account = Http::withHeaders(['api-key' => $apiKey])
+                ->acceptJson()
+                ->timeout(10)
+                ->get('https://api.brevo.com/v3/account')
+                ->throw()
+                ->json();
+            $plan = collect($account['plan'] ?? [])->firstWhere('creditsType', 'sendLimit');
+            $response['quota'] = $plan
+                ? ['available' => true, 'remaining' => $plan['credits'], 'type' => $plan['type'] ?? null]
+                : ['available' => false, 'message' => 'Brevo did not return a transactional send credit balance.'];
+        } catch (Throwable) {
+            $response['quota'] = ['available' => false, 'message' => 'Remaining quota could not be fetched. BREVO_API_KEY is optional and only needed for Brevo quota reporting.'];
+        }
+
+        return response()->json($response, $smtpError === null ? 200 : 422);
+    }
+
     private function uploadedStudentRows(Request $request): array
     {
         $request->validate(['student_file' => ['required', 'file', 'mimes:csv,txt,xlsx', 'max:5120']]);
@@ -386,7 +423,43 @@ class StudentController extends Controller
             }
         }
 
-        return [$headers, $rows, $missing === [] ? null : 'Missing required headers: '.implode(', ', $missing).'.'];
+        if ($missing !== []) {
+            return [$headers, $rows, 'Missing required headers: '.implode(', ', $missing).'.'];
+        }
+
+        $batchLimit = max(1, (int) config('mail.batch_limit', 100));
+        if (count($rows) > $batchLimit) {
+            return [$headers, $rows, "Import is limited to {$batchLimit} student rows per batch."];
+        }
+
+        if (($mailError = $this->testImportSmtpConnection()) !== null) {
+            return [$headers, $rows, $mailError];
+        }
+
+        return [$headers, $rows, null];
+    }
+
+    private function testImportSmtpConnection(): ?string
+    {
+        if (config('mail.default') !== 'smtp' || app()->environment('testing') || Mail::isFake()) {
+            return null;
+        }
+
+        $transport = null;
+        try {
+            $transport = Mail::mailer('smtp')->getSymfonyTransport();
+            $transport->start();
+
+            return null;
+        } catch (Throwable $exception) {
+            if (str_contains(strtolower($exception->getMessage()), 'unauthorized ip')) {
+                return 'Brevo rejected this server IP address. Add the server public IP to Brevo SMTP/API security settings, then test again.';
+            }
+
+            return 'The SMTP mail server could not be reached. Import was not started; check the mail settings and try again.';
+        } finally {
+            $transport?->stop();
+        }
     }
 
     private function importStudentRow(array $headers, array $row): array
@@ -456,7 +529,6 @@ class StudentController extends Controller
     private function studentRows($students)
     {
         $qrCode = app(StudentQrCode::class);
-
 
         return $students->map(fn (Student $student): array => [
             'id' => $student->id,
