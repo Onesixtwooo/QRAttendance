@@ -31,6 +31,42 @@ document.addEventListener('DOMContentLoaded', () => {
         showLoading('Loading page…');
     });
 
+    const mailTestButton = document.getElementById('student-mail-test');
+    const mailTestResult = document.getElementById('student-mail-test-result');
+
+    if (mailTestButton && !mailTestButton.dataset.bound) {
+        mailTestButton.dataset.bound = 'true';
+        mailTestButton.addEventListener('click', async () => {
+            mailTestButton.disabled = true;
+            mailTestButton.textContent = 'Testing SMTP…';
+            mailTestResult.className = 'mt-3 text-sm text-zinc-600';
+            mailTestResult.textContent = 'Checking connection and quota…';
+            mailTestResult.classList.remove('hidden');
+
+            try {
+                const response = await fetch(mailTestButton.dataset.mailStatusUrl, {
+                    method: 'POST',
+                    headers: {
+                        Accept: 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                    },
+                });
+                const data = await response.json().catch(() => ({}));
+                const quota = data.quota?.available
+                    ? ` Remaining Brevo credits: ${data.quota.remaining}.`
+                    : ` ${data.quota?.message || 'Quota unavailable.'}`;
+                mailTestResult.className = response.ok ? 'mt-3 text-sm font-semibold text-emerald-700' : 'mt-3 text-sm font-semibold text-rose-700';
+                mailTestResult.textContent = `${data.message || 'SMTP test failed.'}${quota}`;
+            } catch (error) {
+                mailTestResult.className = 'mt-3 text-sm font-semibold text-rose-700';
+                mailTestResult.textContent = error.message || 'SMTP test failed.';
+            } finally {
+                mailTestButton.disabled = false;
+                mailTestButton.textContent = 'Test SMTP connection';
+            }
+        });
+    }
+
     const form = document.getElementById('student-import-form');
     if (!form) return;
 
@@ -41,43 +77,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const recent = document.getElementById('student-import-recent');
     const errorBox = document.getElementById('student-import-client-error');
     const button = document.getElementById('student-import-submit');
-    const mailTestButton = document.getElementById('student-mail-test');
-    const mailTestResult = document.getElementById('student-mail-test-result');
     let token = null;
     let running = false;
-
-    if (mailTestButton && !mailTestButton.dataset.bound) {
-        mailTestButton.dataset.bound = 'true';
-        mailTestButton.addEventListener('click', async () => {
-        mailTestButton.disabled = true;
-        mailTestButton.textContent = 'Testing SMTP…';
-        mailTestResult.className = 'text-sm text-zinc-600';
-        mailTestResult.textContent = 'Checking connection and quota…';
-        mailTestResult.classList.remove('hidden');
-
-        try {
-            const response = await fetch(form.dataset.mailStatusUrl, {
-                method: 'POST',
-                headers: {
-                    Accept: 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
-                },
-            });
-            const data = await response.json().catch(() => ({}));
-            const quota = data.quota?.available
-                ? ` Remaining Brevo credits: ${data.quota.remaining}.`
-                : ` ${data.quota?.message || 'Quota unavailable.'}`;
-            mailTestResult.className = response.ok ? 'text-sm font-semibold text-emerald-700' : 'text-sm font-semibold text-rose-700';
-            mailTestResult.textContent = `${data.message || 'SMTP test failed.'}${quota}`;
-        } catch (error) {
-            mailTestResult.className = 'text-sm font-semibold text-rose-700';
-            mailTestResult.textContent = error.message || 'SMTP test failed.';
-        } finally {
-            mailTestButton.disabled = false;
-            mailTestButton.textContent = 'Test SMTP connection';
-        }
-        });
-    }
 
     form.querySelector('input[name="student_file"]').addEventListener('change', () => {
         if (!running) token = null;

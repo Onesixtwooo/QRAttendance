@@ -117,7 +117,7 @@
             </div>
         </aside>
 
-        <main class="p-4 sm:p-6 lg:p-8">
+        <main class="min-w-0 p-4 sm:p-6 lg:p-8">
             <header class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <p class="text-sm font-semibold uppercase tracking-wide text-zinc-500">Student Attendance Monitoring System</p>
@@ -198,7 +198,7 @@
                         </div>
                     @endif
 
-                    <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    <section class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
                         <article class="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
                             <p class="text-sm font-semibold text-zinc-500">Mail transport</p>
                             <p class="mt-3 text-2xl font-bold">{{ $mailConfig['mailer'] }}</p>
@@ -224,6 +224,17 @@
                             <p class="mt-3 text-2xl font-bold text-rose-600">{{ number_format($mailCounts['failed_today']) }}</p>
                             <p class="mt-1 text-xs text-zinc-500">Provider quota is not exposed by SMTP</p>
                         </article>
+                    </section>
+
+                    <section class="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+                        <div class="flex flex-wrap items-start justify-between gap-4">
+                            <div>
+                                <h2 class="font-bold">SMTP connection</h2>
+                                <p class="mt-1 text-sm text-zinc-500">Check the Brevo SMTP connection and view the available sending quota.</p>
+                            </div>
+                            <button id="student-mail-test" data-mail-status-url="{{ route('students.mail-status') }}" type="button" class="rounded-lg border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 hover:bg-sky-100">Test SMTP connection</button>
+                        </div>
+                        <p id="student-mail-test-result" class="mt-3 hidden text-sm" role="status" aria-live="polite"></p>
                     </section>
 
                     <section class="rounded-lg border border-zinc-200 bg-white shadow-sm">
@@ -296,9 +307,11 @@
                     <section class="rounded-lg border border-zinc-200 bg-white shadow-sm">
                         <div class="border-b border-zinc-200 p-5">
                             <h2 class="font-bold">Application log</h2>
-                            <p class="mt-1 text-sm text-zinc-500">Showing the latest 250 lines from <span class="font-mono text-xs">{{ $logPath }}</span>.</p>
+                            <p class="mt-1 break-all text-sm text-zinc-500">Showing the latest 250 lines from <span class="font-mono text-xs">{{ $logPath }}</span>.</p>
                         </div>
-                        <pre class="rounded-b-lg p-5 text-xs leading-5" style="height:36rem;max-height:70vh;overflow-y:auto;overflow-x:auto;white-space:pre;background-color:#111827;color:#e5e7eb;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;">{{ $logTail }}</pre>
+                        <div class="min-w-0 max-w-full overflow-hidden rounded-b-lg bg-gray-900">
+                            <pre class="m-0 min-w-0 max-w-full overflow-y-auto p-5 text-xs leading-5" style="width:100%;height:36rem;max-height:70vh;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;background-color:#111827;color:#e5e7eb;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;">{{ $logTail }}</pre>
+                        </div>
                     </section>
                 </section>
             @endif
@@ -1189,11 +1202,6 @@
                         <ul id="student-import-recent" class="mt-3 max-h-36 space-y-1 overflow-auto text-zinc-700"></ul>
                     </div>
                     <p id="student-import-client-error" class="hidden rounded-lg bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700" role="alert"></p>
-                    <div class="flex flex-wrap items-center gap-3">
-                        <button id="student-mail-test" type="button" class="rounded-lg border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 hover:bg-sky-100">Test SMTP connection</button>
-                        <p id="student-mail-test-result" class="hidden text-sm" role="status" aria-live="polite"></p>
-                    </div>
-
                     <div class="flex flex-wrap items-center gap-3">
                         <button id="student-import-submit" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Import Records</button>
                         <a href="{{ route('students') }}" class="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50">Cancel</a>
