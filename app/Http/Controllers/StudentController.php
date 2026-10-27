@@ -6,6 +6,8 @@ use App\Mail\StudentAccountCredentials;
 use App\Models\Student;
 use App\Models\User;
 use App\Support\StudentQrCode;
+use App\Support\StudentCredentialPdf;
+use App\Support\EmailDeliveryFailureLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -57,6 +59,8 @@ class StudentController extends Controller
 
     public function qr(Student $student, StudentQrCode $qrCode): JsonResponse
     {
+        abort_unless(request()->user()?->role === 'admin', 403);
+
         return response()->json($qrCode->generate($student));
     }
 
@@ -65,6 +69,7 @@ class StudentController extends Controller
         abort_unless($request->user()->role === 'admin', 403);
 
         $user = $student->user;
+        $request->merge(['email' => $this->normalizeStudentEmail($request->input('email'))]);
         $data = $request->validate([
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user)],
             'password' => [$user ? 'nullable' : 'required', 'string', 'min:8', 'confirmed'],
@@ -76,6 +81,7 @@ class StudentController extends Controller
             $user->email = $data['email'];
             $user->role = 'student';
             $user->is_active = true;
+            $user->force_password_change = true;
 
             if (filled($data['password'] ?? null)) {
                 $user->password = $data['password'];
@@ -91,6 +97,10 @@ class StudentController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
+        $request->merge([
+            'email' => $this->normalizeStudentEmail($request->input('email')),
+            'student_id' => $this->normalizeStudentId($request->input('student_id')),
+        ]);
         $data = $request->validate(array_merge($this->studentRules(), [
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')],
         ]));
@@ -110,21 +120,34 @@ class StudentController extends Controller
 
     public function storeBulk(Request $request): RedirectResponse
     {
+        $credentialDelivery = $request->input('credential_delivery', 'email');
+        $request->merge(['credential_delivery' => $credentialDelivery]);
         $students = collect($request->input('students', []))
             ->filter(fn ($student): bool => is_array($student) && collect($student)->contains(fn ($value): bool => filled($value)))
+            ->map(function (array $student): array {
+                if (array_key_exists('email', $student)) {
+                    $student['email'] = $this->normalizeStudentEmail($student['email']);
+                }
+                if (array_key_exists('student_id', $student)) {
+                    $student['student_id'] = $this->normalizeStudentId($student['student_id']);
+                }
+
+                return $student;
+            })
             ->values()
             ->all();
         $request->merge(['students' => $students]);
 
         $data = $request->validateWithBag('bulkStudents', [
             'students' => ['required', 'array', 'min:1', 'max:100'],
-            'students.*.student_id' => ['required', 'string', 'max:50', 'distinct', Rule::unique('students', 'student_id')],
+            'students.*.student_id' => ['nullable', 'string', 'max:50', 'distinct', Rule::unique('students', 'student_id')],
             'students.*.email' => ['required', 'email', 'max:255', 'distinct', Rule::unique('users', 'email')],
             'students.*.last_name' => ['required', 'string', 'max:255'],
             'students.*.first_name' => ['required', 'string', 'max:255'],
             'students.*.course' => ['required', 'string', 'max:255'],
             'students.*.block' => ['nullable', Rule::in(range('A', 'G'))],
             'students.*.year_level' => ['required', Rule::in(['1st Year', '2nd Year', '3rd Year', '4th Year', '5th Year'])],
+            'credential_delivery' => ['required', 'in:email,pdf'],
         ]);
 
         $credentials = DB::transaction(function () use ($data): array {
@@ -142,16 +165,42 @@ class StudentController extends Controller
         $count = count($data['students']);
         $sent = 0;
         $failed = [];
+        $credentialRows = [];
 
         foreach ($credentials as [$student, $password]) {
-            if ($this->sendStudentCredentials($student, $password)) {
+            $credentialRows[] = [
+                'name' => trim($student->first_name.' '.$student->last_name),
+                'student_id' => $student->student_id,
+                'email' => $student->user->email,
+                'password' => $password,
+            ];
+
+            if ($credentialDelivery === 'pdf') {
+                $sent++;
+            } elseif ($this->sendStudentCredentials($student, $password)) {
                 $sent++;
             } else {
                 $failed[] = ['id' => $student->id, 'email' => $student->user->email];
             }
         }
 
-        $mailResult = $this->credentialDeliveryStatus($sent);
+        $download = null;
+        if ($credentialDelivery === 'pdf' && $credentialRows !== []) {
+            $token = (string) Str::uuid();
+            Storage::disk('local')->put("student-imports/{$token}.json", json_encode([
+                'user_id' => $request->user()->id,
+                'created_at' => time(),
+                'rows' => [],
+                'next' => 0,
+                'credential_delivery' => 'pdf',
+                'credentials' => $credentialRows,
+            ], JSON_THROW_ON_ERROR));
+            $download = route('students.import.credentials', $token);
+        }
+
+        $mailResult = $credentialDelivery === 'pdf'
+            ? 'credentials were prepared in the PDF download'
+            : $this->credentialDeliveryStatus($sent);
         if ($failed !== []) {
             $mailResult .= '; '.count($failed).' failed';
         }
@@ -159,7 +208,8 @@ class StudentController extends Controller
         return redirect()
             ->route('students')
             ->with('student_status', "Added {$count} student record(s). {$mailResult}.")
-            ->with('student_mail_failures', $failed);
+            ->with('student_mail_failures', $failed)
+            ->with('student_credentials_download', $download);
     }
 
     public function resendCredentials(Request $request, Student $student): RedirectResponse
@@ -173,7 +223,7 @@ class StudentController extends Controller
 
         $password = str()->random(12);
         $previousPassword = $student->user->password;
-        $student->user->update(['password' => $password]);
+        $student->user->update(['password' => $password, 'force_password_change' => true]);
 
         if ($this->sendStudentCredentials($student, $password)) {
             $status = 'Credentials submitted to the configured mail transport for '.$student->user->email.'.';
@@ -233,6 +283,67 @@ class StudentController extends Controller
         });
 
         return back()->with('student_status', "Deleted {$deleted} selected student record(s).");
+    }
+
+    public function resetSelectedCredentials(Request $request): RedirectResponse
+    {
+        $data = $request->validate([
+            'student_ids' => ['required', 'array', 'min:1'],
+            'student_ids.*' => ['integer', 'distinct', 'exists:students,id'],
+            'credential_delivery' => ['required', 'in:email,pdf'],
+        ]);
+        $students = Student::with('user')->whereKey($data['student_ids'])->get();
+        $reset = 0;
+        $failed = [];
+        $credentials = [];
+
+        foreach ($students as $student) {
+            if ($student->user?->role !== 'student') {
+                continue;
+            }
+
+            $user = $student->user;
+            $previousPassword = $user->password;
+            $previousForceChange = $user->force_password_change;
+            $password = str()->random(12);
+            $user->update(['password' => $password, 'force_password_change' => true]);
+            $reset++;
+
+            $credentials[] = [
+                'name' => trim($student->first_name.' '.$student->last_name),
+                'student_id' => $student->student_id,
+                'email' => $user->email,
+                'password' => $password,
+            ];
+
+            if ($data['credential_delivery'] === 'email' && ! $this->sendStudentCredentials($student, $password)) {
+                $user->update(['password' => $previousPassword, 'force_password_change' => $previousForceChange]);
+                $failed[] = ['id' => $student->id, 'email' => $user->email];
+            }
+        }
+
+        $download = null;
+        if ($data['credential_delivery'] === 'pdf' && $credentials !== []) {
+            $token = (string) Str::uuid();
+            Storage::disk('local')->put("student-imports/{$token}.json", json_encode([
+                'user_id' => $request->user()->id,
+                'created_at' => time(),
+                'rows' => [],
+                'next' => 0,
+                'credential_delivery' => 'pdf',
+                'credentials' => $credentials,
+            ], JSON_THROW_ON_ERROR));
+            $download = route('students.import.credentials', $token);
+        }
+
+        $status = $data['credential_delivery'] === 'pdf'
+            ? "Reset {$reset} student account password(s). Credentials were prepared in the PDF download."
+            : "Reset {$reset} student account password(s) and emailed the new credentials.";
+
+        return redirect()->route('students')
+            ->with('student_status', $status)
+            ->with('student_mail_failures', $failed)
+            ->with('student_credentials_download', $download);
     }
 
     public function import(Request $request): RedirectResponse
@@ -296,6 +407,11 @@ class StudentController extends Controller
             'skipped' => 0,
             'sent' => 0,
             'failed' => [],
+            'credentials' => [],
+            'credential_delivery' => Validator::make(
+                ['credential_delivery' => $request->input('credential_delivery', 'email')],
+                ['credential_delivery' => ['required', 'in:email,pdf']],
+            )->validated()['credential_delivery'],
         ], JSON_THROW_ON_ERROR));
 
         return response()->json(['token' => $token, 'total' => count($rows)]);
@@ -321,13 +437,16 @@ class StudentController extends Controller
             $end = min($state['next'] + 10, count($state['rows']));
             while ($state['next'] < $end) {
                 $row = $state['rows'][$state['next']];
-                $result = $this->importStudentRow($state['headers'], $row);
+                $result = $this->importStudentRow($state['headers'], $row, $state['credential_delivery']);
                 $state['next']++;
                 $state['imported'] += (int) ($result['status'] === 'imported');
                 $state['skipped'] += (int) ($result['status'] === 'skipped');
                 $state['sent'] += (int) $result['sent'];
                 if ($result['failure'] !== null) {
                     $state['failed'][] = $result['failure'];
+                }
+                if ($result['credential'] !== null) {
+                    $state['credentials'][] = $result['credential'];
                 }
                 $recent[] = [
                     'row' => $state['next'] + 1,
@@ -342,8 +461,14 @@ class StudentController extends Controller
             fflush($handle);
 
             $complete = $state['next'] === count($state['rows']);
+            $download = null;
             if ($complete) {
-                $status = "Imported {$state['imported']} student record(s). Skipped {$state['skipped']} row(s). ".$this->credentialDeliveryStatus($state['sent']);
+                if ($state['credential_delivery'] === 'pdf' && $state['credentials'] !== []) {
+                    $download = route('students.import.credentials', $data['token']);
+                }
+                $status = "Imported {$state['imported']} student record(s). Skipped {$state['skipped']} row(s). ".($state['credential_delivery'] === 'pdf'
+                    ? 'Credentials were prepared in the PDF download'
+                    : $this->credentialDeliveryStatus($state['sent']));
                 if ($state['failed'] !== []) {
                     $status .= '; '.count($state['failed']).' failed';
                 }
@@ -360,6 +485,7 @@ class StudentController extends Controller
                 'recent' => $recent,
                 'complete' => $complete,
                 'redirect' => $complete ? route('students') : null,
+                'download' => $download,
             ]);
         } finally {
             flock($handle, LOCK_UN);
@@ -403,6 +529,26 @@ class StudentController extends Controller
         return response()->json($response, $smtpError === null ? 200 : 422);
     }
 
+    public function downloadCredentials(Request $request, string $token): \Symfony\Component\HttpFoundation\BinaryFileResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+        abort_unless(Str::isUuid($token), 404);
+
+        $path = "student-imports/{$token}.json";
+        abort_unless(Storage::disk('local')->exists($path), 404);
+
+        $state = json_decode(Storage::disk('local')->get($path), true, 512, JSON_THROW_ON_ERROR);
+        abort_unless((int) $state['user_id'] === (int) $request->user()->id, 403);
+        abort_unless(($state['credential_delivery'] ?? null) === 'pdf' && $state['next'] === count($state['rows']), 404);
+
+        $pdfPath = Storage::disk('local')->path("student-imports/{$token}.pdf");
+        if (! is_file($pdfPath)) {
+            file_put_contents($pdfPath, app(StudentCredentialPdf::class)->render($state['credentials']), LOCK_EX);
+        }
+
+        return response()->download($pdfPath, 'student-account-credentials-'.$token.'.pdf')->deleteFileAfterSend(true);
+    }
+
     private function uploadedStudentRows(Request $request): array
     {
         $request->validate(['student_file' => ['required', 'file', 'mimes:csv,txt,xlsx', 'max:5120']]);
@@ -418,6 +564,10 @@ class StudentController extends Controller
         $headers = $this->normalizeHeaders(array_shift($rows));
         $missing = [];
         foreach ($this->studentImportAliases() as $field => $aliases) {
+            if ($field === 'student_id') {
+                continue;
+            }
+
             if (array_intersect($aliases, $headers) === []) {
                 $missing[] = $field;
             }
@@ -462,39 +612,63 @@ class StudentController extends Controller
         }
     }
 
-    private function importStudentRow(array $headers, array $row): array
+    private function importStudentRow(array $headers, array $row, string $credentialDelivery = 'email'): array
     {
         $data = $this->mapStudentRow($headers, $row);
         if (count(array_filter($data, fn ($value) => $value !== null && $value !== '')) === 0) {
-            return ['status' => 'blank', 'sent' => false, 'failure' => null];
+            return ['status' => 'blank', 'sent' => false, 'failure' => null, 'credential' => null];
         }
 
-        $existingStudent = Student::with('user')->where('student_id', $data['student_id'])->first();
+        $existingStudent = filled($data['student_id'])
+            ? Student::with('user')->where('student_id', $data['student_id'])->first()
+            : Student::with('user')->whereHas('user', fn ($query) => $query->where('email', $data['email']))->first();
         $validator = Validator::make($data, array_merge($this->studentRules($existingStudent), [
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($existingStudent?->user)],
         ]));
         if ($validator->fails()) {
-            return ['status' => 'skipped', 'sent' => false, 'failure' => null];
+            return ['status' => 'skipped', 'sent' => false, 'failure' => null, 'credential' => null];
         }
 
         $validated = $validator->validated();
         $email = $validated['email'];
         unset($validated['email']);
-        $student = Student::updateOrCreate(['student_id' => $validated['student_id']], $validated);
+        if ($existingStudent && ! filled($validated['student_id'] ?? null) && filled($existingStudent->student_id)) {
+            $validated['student_id'] = $existingStudent->student_id;
+        }
+        if ($existingStudent) {
+            $existingStudent->update($validated);
+            $student = $existingStudent->fresh('user');
+        } else {
+            $student = Student::create($validated);
+        }
         $sent = false;
         $failure = null;
+        $credential = null;
         if (! $student->user || $student->user->email !== $email) {
-            $sent = $this->provisionAndNotify($student, $email);
-            if (! $sent) {
+            if ($credentialDelivery === 'email') {
+                $sent = $this->provisionAndNotify($student, $email);
+            } else {
+                $password = $this->provisionStudentAccount($student, $email);
+                $sent = true;
+                $credential = [
+                    'name' => trim($student->first_name.' '.$student->last_name),
+                    'student_id' => $student->student_id,
+                    'email' => $email,
+                    'password' => $password,
+                ];
+            }
+            if ($credentialDelivery === 'email' && ! $sent) {
                 $failure = ['id' => $student->id, 'email' => $email];
             }
         }
 
-        return ['status' => 'imported', 'sent' => $sent, 'failure' => $failure];
+        return ['status' => 'imported', 'sent' => $sent, 'failure' => $failure, 'credential' => $credential];
     }
 
     private function validated(Request $request, ?Student $student = null): array
     {
+        $request->merge(['student_id' => $this->normalizeStudentId($request->input('student_id'))]);
+
         return $request->validate($this->studentRules($student));
     }
 
@@ -515,6 +689,7 @@ class StudentController extends Controller
                 $query->where(function ($query) use ($search) {
                     $query
                         ->where('student_id', 'like', "%{$search}%")
+                        ->when(strtolower($search) === 'unassigned', fn ($query) => $query->orWhereNull('student_id'))
                         ->orWhere('last_name', 'like', "%{$search}%")
                         ->orWhere('first_name', 'like', "%{$search}%")
                         ->orWhere('course', 'like', "%{$search}%")
@@ -547,7 +722,7 @@ class StudentController extends Controller
     {
         return [
             'student_id' => [
-                'required',
+                'nullable',
                 'string',
                 'max:50',
                 Rule::unique('students', 'student_id')->ignore($student),
@@ -591,6 +766,7 @@ class StudentController extends Controller
         $user->password = Hash::make($temporaryPassword);
         $user->role = 'student';
         $user->is_active = true;
+        $user->force_password_change = true;
         $user->save();
         $student->user()->associate($user);
         $student->save();
@@ -602,10 +778,13 @@ class StudentController extends Controller
     {
         try {
             Mail::to($student->user->email)->send(new StudentAccountCredentials($student->load('user'), $temporaryPassword));
+            app(EmailDeliveryFailureLogger::class)->sent('student_credentials', $student->user->email);
+            app(EmailDeliveryFailureLogger::class)->resolve('student_credentials', $student);
 
             return true;
         } catch (Throwable $exception) {
             report($exception);
+            app(EmailDeliveryFailureLogger::class)->record('student_credentials', $student->user->email, $student, $exception);
 
             return false;
         }
@@ -754,6 +933,16 @@ class StudentController extends Controller
                     break;
                 }
             }
+
+            if ($field === 'student_id' && $data[$field] === '') {
+                $data[$field] = null;
+            }
+            if ($field === 'student_id') {
+                $data[$field] = $this->normalizeStudentId($data[$field]);
+            }
+            if ($field === 'email') {
+                $data[$field] = $this->normalizeStudentEmail($data[$field]);
+            }
         }
 
         return $data;
@@ -770,5 +959,19 @@ class StudentController extends Controller
             'block' => ['block', 'section'],
             'year_level' => ['year_level', 'yearlevel', 'year'],
         ];
+    }
+
+    private function normalizeStudentEmail(mixed $email): ?string
+    {
+        $email = trim((string) ($email ?? ''));
+
+        return $email === '' ? null : strtolower($email);
+    }
+
+    private function normalizeStudentId(mixed $studentId): ?string
+    {
+        $studentId = trim((string) ($studentId ?? ''));
+
+        return $studentId === '' ? null : strtoupper($studentId);
     }
 }

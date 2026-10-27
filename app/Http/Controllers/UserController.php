@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Mail\AdminAccountCredentials;
 use App\Models\Booth;
 use App\Models\User;
+use App\Support\EmailDeliveryFailureLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -70,6 +71,7 @@ class UserController extends Controller
                 : 'Admin account created. Login credentials were submitted to the configured mail transport for '.$user->email.'.';
         } catch (Throwable $exception) {
             report($exception);
+            app(EmailDeliveryFailureLogger::class)->record('admin_credentials', $user->email, $user, $exception);
             $status = 'Admin account created, but the login email could not be sent. Check the mail settings, then use Resend credentials beside the account.';
         }
 
@@ -93,10 +95,13 @@ class UserController extends Controller
 
         try {
             Mail::to($user->email)->send(new AdminAccountCredentials($user, $temporaryPassword));
+            app(EmailDeliveryFailureLogger::class)->sent('admin_credentials', $user->email);
+            app(EmailDeliveryFailureLogger::class)->resolve('admin_credentials', $user);
             $status = 'New admin credentials submitted to the configured mail transport for '.$user->email.'.';
         } catch (Throwable $exception) {
             report($exception);
             $user->update(['password' => $previousPassword]);
+            app(EmailDeliveryFailureLogger::class)->record('admin_credentials', $user->email, $user, $exception);
             $status = 'Admin credentials could not be sent to '.$user->email.'. The existing password still works. Check the mail settings and try again.';
         }
 

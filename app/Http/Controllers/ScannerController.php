@@ -11,6 +11,8 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 use Illuminate\View\View;
 
 class ScannerController extends Controller
@@ -45,8 +47,11 @@ class ScannerController extends Controller
             ], 422);
         }
 
-        $studentCode = $qrIdentity['student_id'];
-        $student = Student::query()->where('student_id', $studentCode)->first();
+        $student = $qrIdentity['student_qr_token']
+            ? Student::query()->where('qr_token', $qrIdentity['student_qr_token'])->first()
+            : ($qrIdentity['student_record_id']
+            ? Student::query()->find($qrIdentity['student_record_id'])
+            : Student::query()->where('student_id', $qrIdentity['student_id'])->first());
 
         if (! $student) {
             return response()->json([
@@ -81,28 +86,80 @@ class ScannerController extends Controller
 
         $scanType = $scanDecision['type'];
 
+        $approvalToken = (string) Str::uuid();
+        Cache::put('attendance-approval:'.$student->id.':'.$approvalToken, [
+            'event_id' => $event->id,
+            'booth_id' => $booth->id,
+            'student_id' => $student->id,
+            'scan_type' => $scanType,
+            'verification_code' => $qrIdentity['verification_code'],
+        ], now()->addMinutes(2));
+        Cache::put('attendance-approval:'.$student->id.':current', $approvalToken, now()->addMinutes(2));
+
+        return response()->json([
+            'message' => 'Scan received. The student must approve it from their portal.',
+            'pending_confirmation' => true,
+            'student' => trim($student->first_name.' '.$student->last_name),
+        ]);
+    }
+
+    public function confirm(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->role === 'student', 403);
+
+        $data = $request->validate([
+            'token' => ['required', 'uuid'],
+        ]);
+        $student = $request->user()->student;
+        abort_unless($student, 403);
+
+        $key = 'attendance-approval:'.$student->id.':'.$data['token'];
+        $pending = Cache::pull($key);
+        $currentKey = 'attendance-approval:'.$student->id.':current';
+        if (Cache::get($currentKey) === $data['token']) {
+            Cache::forget($currentKey);
+        }
+
+        if (! is_array($pending) || (int) $pending['student_id'] !== (int) $student->id) {
+            return response()->json(['message' => 'This attendance request has expired.'], 422);
+        }
+
+        $event = EventSchedule::query()->find($pending['event_id']);
+        $booth = Booth::query()->find($pending['booth_id']);
+
+        if (! $event || ! $booth || $event->status !== 'In Progress') {
+            return response()->json(['message' => 'This attendance event is no longer available.'], 422);
+        }
+
+        $scanDecision = $this->nextScanDecision($event, $student);
+
+        if ($scanDecision['type'] !== $pending['scan_type']) {
+            return response()->json([
+                'message' => $scanDecision['message'] ?: 'This attendance request is no longer valid.',
+            ], $scanDecision['status']);
+        }
+
         try {
             $record = AttendanceRecord::create([
                 'event_schedule_id' => $event->id,
                 'booth_id' => $booth->id,
                 'student_id' => $student->id,
                 'scanned_at' => now(),
-                'scan_type' => $scanType,
+                'scan_type' => $pending['scan_type'],
             ]);
         } catch (UniqueConstraintViolationException) {
             return response()->json([
-                'message' => 'This student already has a '.$scanType.' scan for the current event.',
+                'message' => 'This student already has a '.$pending['scan_type'].' scan for the current event.',
             ], 409);
         }
 
         return response()->json([
-            'message' => match ($scanType) {
-                AttendanceRecord::TYPE_TIME_OUT => 'Time-out scan saved.',
-                AttendanceRecord::TYPE_VERIFICATION => 'Verification scan saved.',
-                default => 'Time-in scan saved.',
+            'message' => match ($record->scan_type) {
+                AttendanceRecord::TYPE_TIME_OUT => 'Time-out scan approved.',
+                AttendanceRecord::TYPE_VERIFICATION => 'Verification scan approved.',
+                default => 'Time-in scan approved.',
             },
             'record' => [
-                'id' => $record->id,
                 'event' => $event->title,
                 'scan_type' => $record->scan_type,
                 'scan_type_label' => match ($record->scan_type) {
@@ -112,7 +169,7 @@ class ScannerController extends Controller
                 },
                 'student' => trim($student->first_name.' '.$student->last_name),
                 'student_id' => $student->student_id,
-                'verification_code' => $qrIdentity['verification_code'],
+                'verification_code' => $pending['verification_code'],
                 'course' => $student->course,
                 'block' => $student->block,
                 'year_level' => $student->year_level,
@@ -136,6 +193,8 @@ class ScannerController extends Controller
 
         return [
             'student_id' => trim((string) $decoded['student_id']),
+            'student_qr_token' => trim((string) ($decoded['student_qr_token'] ?? '')),
+            'student_record_id' => filter_var($decoded['student_record_id'] ?? null, FILTER_VALIDATE_INT),
             'verification_code' => strtoupper(substr((string) $decoded['signature'], 0, 8)),
         ];
     }

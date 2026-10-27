@@ -8,6 +8,7 @@ use App\Http\Controllers\EventScheduleController;
 use App\Http\Controllers\ScannerController;
 use App\Http\Controllers\StudentController;
 use App\Http\Controllers\StudentPortalController;
+use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
 
@@ -24,8 +25,12 @@ Route::post('/logout', [AuthController::class, 'destroy'])->name('logout');
 Route::middleware('auth')->group(function () {
     Route::get('/my-attendance', [StudentPortalController::class, 'index'])->name('student.portal');
     Route::get('/my-attendance/qr-code', [StudentPortalController::class, 'qr'])->name('student.qr');
+    Route::get('/my-attendance/attendance-approval', [StudentPortalController::class, 'approval'])->name('student.attendance-approval');
+    Route::post('/my-attendance/attendance-approval', [StudentPortalController::class, 'confirmApproval'])->name('student.attendance-approval.confirm');
     Route::patch('/my-attendance/account', [StudentPortalController::class, 'updateAccount'])->name('student.account.update');
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    Route::get('/settings', [SettingsController::class, 'index'])->name('settings');
+    Route::post('/settings/mail-failures/{failure}/retry', [SettingsController::class, 'retryMail'])->name('settings.mail-failures.retry');
     Route::get('/users', [UserController::class, 'index'])->name('users');
     Route::post('/users', [UserController::class, 'store'])->name('users.store');
     Route::post('/users/{user}/credentials/resend', [UserController::class, 'resendCredentials'])->name('users.credentials.resend');
@@ -40,7 +45,10 @@ Route::middleware('auth')->group(function () {
     Route::post('/students/import', [StudentController::class, 'import'])->name('students.import');
     Route::post('/students/import/prepare', [StudentController::class, 'prepareImport'])->name('students.import.prepare');
     Route::post('/students/import/progress', [StudentController::class, 'processImport'])->name('students.import.progress');
+    Route::get('/students/import/{token}/credentials.pdf', [StudentController::class, 'downloadCredentials'])->name('students.import.credentials');
+    Route::match(['get', 'post'], '/students/mail-status', [StudentController::class, 'mailStatus'])->name('students.mail-status');
     Route::delete('/students/bulk', [StudentController::class, 'destroySelected'])->name('students.destroy-selected');
+    Route::post('/students/accounts/reset-selected', [StudentController::class, 'resetSelectedCredentials'])->name('students.accounts.reset-selected');
     Route::patch('/students/{student}', [StudentController::class, 'update'])->name('students.update');
     Route::delete('/students/{student}', [StudentController::class, 'destroy'])->name('students.destroy');
     Route::get('/qr-scanner', [ScannerController::class, 'index'])->name('scanner');

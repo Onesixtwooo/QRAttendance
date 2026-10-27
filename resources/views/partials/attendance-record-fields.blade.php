@@ -33,7 +33,7 @@
     <select name="student_id" class="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500">
         <option value="">Unassigned student</option>
         @foreach ($recordFilterOptions['students'] as $student)
-            <option value="{{ $student->id }}" @selected((string) $selectedStudent === (string) $student->id)>{{ $student->student_id }} - {{ $student->first_name }} {{ $student->last_name }}</option>
+            <option value="{{ $student->id }}" @selected((string) $selectedStudent === (string) $student->id)>{{ $student->student_id ?: 'Unassigned' }} - {{ $student->first_name }} {{ $student->last_name }}</option>
         @endforeach
     </select>
     @error('student_id') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror

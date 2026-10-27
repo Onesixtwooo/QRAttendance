@@ -7,6 +7,7 @@ export default defineConfig(({ mode }) => {
     const devHost = env.VITE_DEV_HOST || '0.0.0.0';
     const hmrHost = env.VITE_HMR_HOST || '127.0.0.1';
     const devOrigin = env.VITE_DEV_ORIGIN || `http://${hmrHost}:5173`;
+    const corsOrigin = env.VITE_CORS_ORIGIN || env.APP_URL || true;
 
     return {
     plugins: [
@@ -20,6 +21,7 @@ export default defineConfig(({ mode }) => {
         host: devHost,
         port: 5173,
         origin: devOrigin,
+        cors: { origin: corsOrigin },
         hmr: {
             host: hmrHost,
             port: 5173,

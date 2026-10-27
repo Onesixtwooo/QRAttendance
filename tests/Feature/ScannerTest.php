@@ -601,6 +601,22 @@ class ScannerTest extends TestCase
         $this->assertSame($student->student_id, json_decode($code['payload'], true)['student_id']);
     }
 
+    public function test_student_qr_can_be_generated_without_a_student_id(): void
+    {
+        $student = Student::create([
+            'student_id' => null, 'last_name' => 'Santos', 'first_name' => 'Mika',
+            'course' => 'BSIT', 'block' => 'A', 'year_level' => '1st Year',
+        ]);
+
+        $code = app(StudentQrCode::class)->generate($student);
+        $payload = json_decode($code['payload'], true);
+
+        $this->assertNull($payload['student_id']);
+        $this->assertSame($student->id, $payload['student_record_id']);
+        $this->assertTrue(app(StudentQrCode::class)->valid($payload));
+        $this->assertStringStartsWith('data:image/png;base64,', $code['image_url']);
+    }
+
     private function payloadFor(string $studentId): string
     {
         $student = Student::where('student_id', $studentId)->firstOrFail();

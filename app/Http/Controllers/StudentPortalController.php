@@ -8,6 +8,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
@@ -52,6 +53,28 @@ class StudentPortalController extends Controller
         return response()->json($qrCode->generate($student));
     }
 
+    public function approval(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->role === 'student', 403);
+        $student = $request->user()->student;
+        abort_unless($student, 403);
+
+        $token = Cache::get('attendance-approval:'.$student->id.':current');
+
+        if ($token && Cache::has('attendance-approval:'.$student->id.':'.$token)) {
+            return response()->json(['pending' => true, 'token' => $token]);
+        }
+
+        return response()->json(['pending' => false]);
+    }
+
+    public function confirmApproval(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->role === 'student', 403);
+
+        return app(\App\Http\Controllers\ScannerController::class)->confirm($request);
+    }
+
     public function updateAccount(Request $request): RedirectResponse
     {
         abort_unless($request->user()->role === 'student', 403);
@@ -59,10 +82,11 @@ class StudentPortalController extends Controller
         $user = $request->user();
         $data = $request->validate([
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user)],
-            'password' => ['nullable', 'string', 'min:8', 'confirmed'],
+            'password' => [$user->force_password_change ? 'required' : 'nullable', 'string', 'min:8', 'confirmed'],
         ]);
 
         $user->email = $data['email'];
+        $user->force_password_change = false;
 
         if (filled($data['password'] ?? null)) {
             $user->password = Hash::make($data['password']);

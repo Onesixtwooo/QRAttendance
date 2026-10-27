@@ -9,6 +9,7 @@
         ['key' => 'records', 'label' => 'Attendance Records', 'icon' => 'AR', 'route' => 'records'],
         ['key' => 'schedule', 'label' => 'Event Schedule', 'icon' => 'EV', 'route' => 'schedule'],
         ['key' => 'booths', 'label' => 'Scanner Operators', 'icon' => 'SO', 'route' => 'booths'],
+        ['key' => 'settings', 'label' => 'Settings', 'icon' => 'SE', 'route' => 'settings'],
     ];
 
     $isBoothUser = auth()->user()?->role === 'booth';
@@ -49,6 +50,13 @@
     $userCounts = array_merge([
         'admin' => $users->where('role', 'admin')->count(),
     ], $userCounts ?? []);
+
+    $logTail = $logTail ?? '';
+    $logPath = $logPath ?? storage_path('logs/laravel.log');
+    $mailFailures = $mailFailures ?? collect();
+    $failedJobs = $failedJobs ?? collect();
+    $mailConfig = $mailConfig ?? ['mailer' => config('mail.default'), 'batch_limit' => config('mail.batch_limit'), 'from' => config('mail.from.address')];
+    $mailCounts = $mailCounts ?? ['sent_today' => 0, 'failed_today' => 0];
 @endphp
 
 <!DOCTYPE html>
@@ -179,6 +187,119 @@
                             </div>
                         </div>
                     </article>
+                </section>
+            @endif
+
+            @if ($page === 'settings')
+                <section class="grid gap-6">
+                    @if (session('settings_status'))
+                        <div class="rounded-lg border border-emerald-100 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-700">
+                            {{ session('settings_status') }}
+                        </div>
+                    @endif
+
+                    <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                        <article class="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+                            <p class="text-sm font-semibold text-zinc-500">Mail transport</p>
+                            <p class="mt-3 text-2xl font-bold">{{ $mailConfig['mailer'] }}</p>
+                            <p class="mt-1 text-xs text-zinc-500">{{ $mailConfig['from'] }}</p>
+                        </article>
+                        <article class="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+                            <p class="text-sm font-semibold text-zinc-500">Pending email failures</p>
+                            <p class="mt-3 text-2xl font-bold text-rose-600">{{ $mailFailures->count() }}</p>
+                            <p class="mt-1 text-xs text-zinc-500">SMTP limit or transport errors</p>
+                        </article>
+                        <article class="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+                            <p class="text-sm font-semibold text-zinc-500">SMTP batch limit</p>
+                            <p class="mt-3 text-2xl font-bold">{{ number_format($mailConfig['batch_limit']) }}</p>
+                            <p class="mt-1 text-xs text-zinc-500">Configured mail batch size</p>
+                        </article>
+                        <article class="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+                            <p class="text-sm font-semibold text-zinc-500">Emails sent today</p>
+                            <p class="mt-3 text-2xl font-bold text-emerald-700">{{ number_format($mailCounts['sent_today']) }}</p>
+                            <p class="mt-1 text-xs text-zinc-500">Recorded by this application</p>
+                        </article>
+                        <article class="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+                            <p class="text-sm font-semibold text-zinc-500">Failed attempts today</p>
+                            <p class="mt-3 text-2xl font-bold text-rose-600">{{ number_format($mailCounts['failed_today']) }}</p>
+                            <p class="mt-1 text-xs text-zinc-500">Provider quota is not exposed by SMTP</p>
+                        </article>
+                    </section>
+
+                    <section class="rounded-lg border border-zinc-200 bg-white shadow-sm">
+                        <div class="border-b border-zinc-200 p-5">
+                            <h2 class="font-bold">Unsent emails</h2>
+                            <p class="mt-1 text-sm text-zinc-500">Credential emails that failed during delivery are kept here until they are sent successfully.</p>
+                        </div>
+                        @if ($mailFailures->isEmpty())
+                            <p class="p-5 text-sm text-zinc-500">No pending email failures.</p>
+                        @else
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left text-sm">
+                                    <thead class="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
+                                        <tr>
+                                            <th class="px-5 py-3">Recipient</th>
+                                            <th class="px-5 py-3">Type</th>
+                                            <th class="px-5 py-3">Last error</th>
+                                            <th class="px-5 py-3">Attempts</th>
+                                            <th class="px-5 py-3"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-zinc-100">
+                                        @foreach ($mailFailures as $failure)
+                                            <tr>
+                                                <td class="px-5 py-4 font-semibold text-zinc-800">{{ $failure->recipient }}</td>
+                                                <td class="px-5 py-4 text-zinc-600">{{ str_replace('_', ' ', ucfirst($failure->kind)) }}</td>
+                                                <td class="max-w-md px-5 py-4 text-xs text-rose-700">{{ $failure->error }}</td>
+                                                <td class="px-5 py-4 text-zinc-600">{{ $failure->attempts }}</td>
+                                                <td class="px-5 py-4 text-right">
+                                                    <form method="POST" action="{{ route('settings.mail-failures.retry', $failure) }}">
+                                                        @csrf
+                                                        <button class="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700">Retry</button>
+                                                    </form>
+                                                </td>
+                                            </tr>
+                                        @endforeach
+                                    </tbody>
+                                </table>
+                            </div>
+                        @endif
+                    </section>
+
+                    <section class="rounded-lg border border-zinc-200 bg-white shadow-sm">
+                        <div class="border-b border-zinc-200 p-5">
+                            <h2 class="font-bold">Laravel failed queue jobs</h2>
+                            <p class="mt-1 text-sm text-zinc-500">These are jobs recorded by Laravel’s queue worker, including queued mail jobs if queues are enabled.</p>
+                        </div>
+                        @if ($failedJobs->isEmpty())
+                            <p class="p-5 text-sm text-zinc-500">No failed queue jobs.</p>
+                        @else
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left text-sm">
+                                    <thead class="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
+                                        <tr><th class="px-5 py-3">Queue</th><th class="px-5 py-3">Failed at</th><th class="px-5 py-3">Exception</th></tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-zinc-100">
+                                        @foreach ($failedJobs as $job)
+                                            <tr>
+                                                <td class="px-5 py-4 text-zinc-600">{{ $job->queue }}</td>
+                                                <td class="px-5 py-4 text-zinc-600">{{ $job->failed_at }}</td>
+                                                <td class="max-w-2xl px-5 py-4 text-xs text-rose-700">{{ Str::limit($job->exception, 300) }}</td>
+                                            </tr>
+                                        @endforeach
+                                    </tbody>
+                                </table>
+                            </div>
+                        @endif
+                    </section>
+
+                    <section class="rounded-lg border border-zinc-200 bg-white shadow-sm">
+                        <div class="border-b border-zinc-200 p-5">
+                            <h2 class="font-bold">Application log</h2>
+                            <p class="mt-1 text-sm text-zinc-500">Showing the latest 250 lines from <span class="font-mono text-xs">{{ $logPath }}</span>.</p>
+                        </div>
+                        <pre class="rounded-b-lg p-5 text-xs leading-5" style="height:36rem;max-height:70vh;overflow-y:auto;overflow-x:auto;white-space:pre;background-color:#111827;color:#e5e7eb;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;">{{ $logTail }}</pre>
+                    </section>
                 </section>
             @endif
 
@@ -325,6 +446,9 @@
                     @if (session('student_status'))
                         <div class="border-b border-emerald-100 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-700">
                             {{ session('student_status') }}
+                            @if (session('student_credentials_download'))
+                                <a href="{{ session('student_credentials_download') }}" class="ml-2 inline-block underline" download>Download credential PDF</a>
+                            @endif
                         </div>
                     @endif
 
@@ -410,8 +534,8 @@
                             </div>
 
                             <label class="grid gap-1 text-sm font-semibold text-zinc-700">
-                                Student ID
-                                <input name="student_id" value="{{ old('student_id', $editStudent->student_id) }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500" required>
+                                Student ID <span class="font-normal text-zinc-400">(optional)</span>
+                                <input name="student_id" value="{{ old('student_id', $editStudent->student_id) }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-emerald-500">
                                 @error('student_id') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
                             </label>
 
@@ -487,7 +611,7 @@
                                                 <td class="px-5 py-4">
                                                     <input type="checkbox" name="student_ids[]" value="{{ $student["id"] }}" form="bulk-delete-students" class="student-selection h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500" aria-label="Select {{ $student["first_name"] }} {{ $student["last_name"] }}">
                                                 </td>
-                                                <td class="px-5 py-4 font-semibold">{{ $student["student_id"] }}</td>
+                                                <td class="px-5 py-4 font-semibold">{{ $student["student_id"] ?: "Unassigned" }}</td>
                                                 <td class="px-5 py-4 text-zinc-700">{{ $student["last_name"] }}, {{ $student["first_name"] }}</td>
                                                 <td class="px-5 py-4">
                                                     <div class="flex justify-end gap-2">
@@ -518,12 +642,20 @@
                                 Student records are loaded only after applying a search or filter.
                             @endif
                         </p>
-                        <div class="flex items-center gap-2">
+                        <div class="flex flex-col items-stretch gap-2 sm:items-end">
                             @if ($students->isNotEmpty())
                                 <form id="bulk-delete-students" method="POST" action="{{ route('students.destroy-selected') }}" onsubmit="return confirm('Delete the selected student records?')">
                                     @csrf
                                     @method('DELETE')
                                     <button id="delete-selected-students" disabled class="rounded-lg border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40">Delete Selected</button>
+                                </form>
+                                <form id="bulk-reset-students" method="POST" action="{{ route('students.accounts.reset-selected') }}" onsubmit="return confirm('Reset passwords for the selected student accounts?')" class="flex flex-wrap items-center justify-end gap-2">
+                                    @csrf
+                                    <select name="credential_delivery" class="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700">
+                                        <option value="email">Email new passwords</option>
+                                        <option value="pdf">Download passwords as PDF</option>
+                                    </select>
+                                    <button id="reset-selected-students" disabled class="rounded-lg border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40">Reset Account Passwords</button>
                                 </form>
                             @endif
                         </div>
@@ -752,7 +884,7 @@
                                         <tbody class="divide-y divide-zinc-100">
                                             @forelse ($record['attendees'] as $attendee)
                                                 <tr>
-                                                    <td class="px-5 py-3 font-semibold text-zinc-800">{{ $attendee['student_id'] }}</td>
+                                                    <td class="px-5 py-3 font-semibold text-zinc-800">{{ $attendee['student_id'] ?: 'Unassigned' }}</td>
                                                     <td class="px-5 py-3 text-zinc-700">{{ $attendee['name'] }}</td>
                                                     <td class="px-5 py-3">
                                                         <span class="font-semibold text-zinc-800">{{ $attendee['time_in'] ?? 'Pending' }}</span>
@@ -971,7 +1103,7 @@
                     <div class="flex items-center justify-between border-b border-zinc-200 p-5">
                         <div>
                             <h2 class="font-bold">Student Details</h2>
-                            <p class="mt-1 text-sm text-zinc-500">{{ $student['student_id'] }}</p>
+                            <p class="mt-1 text-sm text-zinc-500">{{ $student['student_id'] ?: 'Unassigned' }}</p>
                         </div>
                         <a href="{{ $studentsFilteredUrl }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50">Close</a>
                     </div>
@@ -983,7 +1115,7 @@
                         </div>
                         <div class="sm:col-span-2 rounded-lg border border-emerald-100 bg-emerald-50 p-4 text-center">
                             <dt class="text-xs font-semibold uppercase text-emerald-700">Attendance QR Code</dt>
-                            <img data-student-qr-image src="{{ $student['qr_code']['image_url'] }}" data-qr-endpoint="{{ route('students.qr', $student['id']) }}" alt="Attendance QR code for {{ $student['student_id'] }}" class="student-qr-image mx-auto mt-3 h-56 w-56 rounded bg-white p-2">
+                            <img data-student-qr-image src="{{ $student['qr_code']['image_url'] }}" data-qr-endpoint="{{ route('students.qr', $student['id']) }}" alt="Attendance QR code for {{ $student['student_id'] ?: 'student' }}" class="student-qr-image mx-auto mt-3 h-56 w-56 rounded bg-white p-2">
                             <p data-student-qr-code class="mt-2 font-mono text-sm font-bold tracking-[0.15em] text-emerald-900">{{ $student['qr_code']['verification_code'] }}</p>
                             <p class="mt-1 text-xs text-emerald-700">Refreshes automatically every minute while this page is open.</p>
                         </div>
@@ -1030,11 +1162,11 @@
                     <a href="{{ route('students') }}" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50">Close</a>
                 </div>
 
-                <form id="student-import-form" method="POST" action="{{ route('students.import') }}" data-prepare-url="{{ route('students.import.prepare') }}" data-progress-url="{{ route('students.import.progress') }}" enctype="multipart/form-data" class="grid gap-4 p-5">
+                <form id="student-import-form" method="POST" action="{{ route('students.import') }}" data-prepare-url="{{ route('students.import.prepare') }}" data-progress-url="{{ route('students.import.progress') }}" data-mail-status-url="{{ route('students.mail-status') }}" enctype="multipart/form-data" class="grid gap-4 p-5">
                     @csrf
 
                     <div class="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
-                        Required headers: <span class="font-semibold text-zinc-800">student_id, email, last_name, first_name, course, block, year_level</span>. Rows without an email are skipped.
+                        Required headers: <span class="font-semibold text-zinc-800">email, last_name, first_name, course, block, year_level</span>. The optional <span class="font-semibold text-zinc-800">student_id</span> column may be omitted or contain blank values. Rows without an email are skipped.
                     </div>
 
                     <label class="grid gap-1 text-sm font-semibold text-zinc-700">
@@ -1043,6 +1175,13 @@
                         @error('student_file') <span class="text-xs text-rose-600">{{ $message }}</span> @enderror
                     </label>
 
+                    <fieldset class="grid gap-2">
+                        <legend class="text-sm font-semibold text-zinc-700">Credential delivery</legend>
+                        <label class="flex items-center gap-2 text-sm text-zinc-700"><input type="radio" name="credential_delivery" value="email" checked class="text-emerald-600"> Email credentials</label>
+                        <label class="flex items-center gap-2 text-sm text-zinc-700"><input type="radio" name="credential_delivery" value="pdf" class="text-emerald-600"> Download credentials as PDF</label>
+                        <p class="text-xs text-zinc-500">New student accounts require a password change at first login.</p>
+                    </fieldset>
+
                     <div id="student-import-progress" class="hidden rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm" role="status" aria-live="polite">
                         <p id="student-import-stage" class="font-semibold text-emerald-900">Preparing import…</p>
                         <progress id="student-import-bar" class="mt-3 h-3 w-full accent-emerald-600" value="0" max="100"></progress>
@@ -1050,6 +1189,10 @@
                         <ul id="student-import-recent" class="mt-3 max-h-36 space-y-1 overflow-auto text-zinc-700"></ul>
                     </div>
                     <p id="student-import-client-error" class="hidden rounded-lg bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700" role="alert"></p>
+                    <div class="flex flex-wrap items-center gap-3">
+                        <button id="student-mail-test" type="button" class="rounded-lg border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 hover:bg-sky-100">Test SMTP connection</button>
+                        <p id="student-mail-test-result" class="hidden text-sm" role="status" aria-live="polite"></p>
+                    </div>
 
                     <div class="flex flex-wrap items-center gap-3">
                         <button id="student-import-submit" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">Import Records</button>
@@ -1084,12 +1227,19 @@
                         </div>
                     @endif
 
+                    <fieldset class="grid gap-2 border-b border-zinc-200 px-5 py-3">
+                        <legend class="text-sm font-semibold text-zinc-700">Credential delivery</legend>
+                        <label class="flex items-center gap-2 text-sm text-zinc-700"><input type="radio" name="credential_delivery" value="email" @checked(old('credential_delivery', 'email') === 'email') class="text-emerald-600"> Email credentials</label>
+                        <label class="flex items-center gap-2 text-sm text-zinc-700"><input type="radio" name="credential_delivery" value="pdf" @checked(old('credential_delivery') === 'pdf') class="text-emerald-600"> Download credentials as PDF</label>
+                        <p class="text-xs text-zinc-500">New student accounts require a password change at first login.</p>
+                    </fieldset>
+
                     <div class="min-h-0 flex-1 overflow-auto p-5">
                         <table class="w-full min-w-[1100px] border-collapse text-sm">
                             <thead class="sticky top-0 z-10 bg-zinc-100 text-left text-xs uppercase text-zinc-600">
                                 <tr>
                                     <th class="w-12 border border-zinc-300 px-3 py-2">#</th>
-                                    <th class="border border-zinc-300 px-3 py-2">Student ID</th>
+                                    <th class="border border-zinc-300 px-3 py-2">Student ID <span class="normal-case font-normal text-zinc-400">(optional)</span></th>
                                     <th class="border border-zinc-300 px-3 py-2">Email (required)</th>
                                     <th class="border border-zinc-300 px-3 py-2">Last Name</th>
                                     <th class="border border-zinc-300 px-3 py-2">First Name</th>
@@ -1605,7 +1755,7 @@
                 latestEvent.textContent = record.event;
                 latestScanType.textContent = record.scan_type_label;
                 latestStudent.textContent = record.student;
-                latestStudentId.textContent = record.student_id;
+                latestStudentId.textContent = record.student_id || 'Unassigned';
                 latestVerificationCode.textContent = record.verification_code;
                 latestCourse.textContent = `${record.course} / ${record.block} / ${record.year_level}`;
                 latestBooth.textContent = record.booth;
@@ -1658,8 +1808,10 @@
                         throw new Error(data.message ?? 'Scan could not be saved.');
                     }
 
-                    updateLatestScan(data.record);
-                    playScanBuzzer();
+                    if (data.record) {
+                        updateLatestScan(data.record);
+                        playScanBuzzer();
+                    }
                     setScannerMessage(data.message, 'success', true);
                 } catch (error) {
                     setScannerMessage(error.message, 'error', true);
@@ -1806,6 +1958,8 @@
             const selectAllStudents = document.getElementById('select-all-students');
             const studentSelections = Array.from(document.querySelectorAll('.student-selection'));
             const deleteSelectedStudents = document.getElementById('delete-selected-students');
+            const resetSelectedStudents = document.getElementById('reset-selected-students');
+            const bulkResetStudents = document.getElementById('bulk-reset-students');
 
             function updateStudentSelection() {
                 const selectedCount = studentSelections.filter((checkbox) => checkbox.checked).length;
@@ -1817,6 +1971,7 @@
 
                 if (deleteSelectedStudents) {
                     deleteSelectedStudents.disabled = selectedCount === 0;
+                if (resetSelectedStudents) resetSelectedStudents.disabled = selectedCount === 0;
                     deleteSelectedStudents.textContent = selectedCount > 0 ? `Delete Selected (${selectedCount})` : 'Delete Selected';
                 }
             }
@@ -1828,6 +1983,17 @@
                 updateStudentSelection();
             });
             studentSelections.forEach((checkbox) => checkbox.addEventListener('change', updateStudentSelection));
+
+            bulkResetStudents?.addEventListener('submit', () => {
+                bulkResetStudents.querySelectorAll('input[name="student_ids[]"]').forEach((input) => input.remove());
+                studentSelections.filter((checkbox) => checkbox.checked).forEach((checkbox) => {
+                    const input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = 'student_ids[]';
+                    input.value = checkbox.value;
+                    bulkResetStudents.append(input);
+                });
+            });
 
             const bulkStudentRows = document.getElementById('bulk-student-rows');
             const bulkStudentRowTemplate = document.getElementById('bulk-student-row-template');

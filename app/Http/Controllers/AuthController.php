@@ -50,6 +50,10 @@ class AuthController extends Controller
         $request->session()->regenerate();
         $request->user()->booth?->markSeen();
 
+        if ($request->user()->role === 'student' && $request->user()->force_password_change) {
+            return redirect()->route('student.portal')->with('force_password_change', true);
+        }
+
         return redirect()->intended($this->redirectPath($request->user()->role));
     }
 

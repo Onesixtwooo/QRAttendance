@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Str;
 
 class Student extends Model
 {
@@ -16,6 +17,13 @@ class Student extends Model
         'block',
         'year_level',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (Student $student): void {
+            $student->qr_token ??= (string) Str::uuid();
+        });
+    }
 
     public function user(): BelongsTo
     {

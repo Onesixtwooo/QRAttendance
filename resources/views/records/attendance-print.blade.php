@@ -493,7 +493,7 @@
                         <tbody>
                             @foreach ($section['attendees'] as $attendee)
                                 <tr>
-                                    <td><strong>{{ $attendee['student_id'] }}</strong></td>
+                                    <td><strong>{{ $attendee['student_id'] ?: 'Unassigned' }}</strong></td>
                                     <td>{{ $attendee['name'] }}</td>
                                     <td>{{ $attendee['time_in'] ?? 'Pending' }}</td>
                                     <td>{{ $attendee['attendance_status'] }}</td>

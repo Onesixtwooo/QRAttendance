@@ -9,16 +9,21 @@ use Endroid\QrCode\Writer\PngWriter;
 
 class StudentQrCode
 {
-    public const LIFETIME_SECONDS = 60;
+    public const LIFETIME_SECONDS = 30;
 
     public function generate(Student $student, ?CarbonImmutable $now = null): array
     {
         $now ??= CarbonImmutable::now();
         $expiresAt = $now->addSeconds(self::LIFETIME_SECONDS)->timestamp;
-        $signature = $this->signature($student->student_id, $expiresAt);
+        $identity = filled($student->qr_token)
+            ? 'token:'.$student->qr_token
+            : (filled($student->student_id) ? 'student:'.$student->student_id : 'record:'.$student->getKey());
+        $signature = $this->signature($identity, $expiresAt);
         $payload = json_encode([
             'type' => 'student_dynamic',
             'student_id' => $student->student_id,
+            'student_qr_token' => $student->qr_token,
+            'student_record_id' => $student->getKey(),
             'expires_at' => $expiresAt,
             'signature' => $signature,
         ], JSON_UNESCAPED_SLASHES);
@@ -36,14 +41,20 @@ class StudentQrCode
     {
         $now ??= CarbonImmutable::now();
         $studentId = trim((string) ($payload['student_id'] ?? ''));
+        $studentQrToken = trim((string) ($payload['student_qr_token'] ?? ''));
+        $studentRecordId = filter_var($payload['student_record_id'] ?? null, FILTER_VALIDATE_INT);
         $expiresAt = filter_var($payload['expires_at'] ?? null, FILTER_VALIDATE_INT);
         $signature = (string) ($payload['signature'] ?? '');
 
-        if ($studentId === '' || ! $expiresAt || $signature === '' || $expiresAt < $now->timestamp) {
+        if (($studentQrToken === '' && $studentId === '' && ! $studentRecordId) || ! $expiresAt || $signature === '' || $expiresAt < $now->timestamp) {
             return false;
         }
 
-        return hash_equals($this->signature($studentId, $expiresAt), $signature);
+        $identity = $studentQrToken !== ''
+            ? 'token:'.$studentQrToken
+            : ($studentId !== '' ? 'student:'.$studentId : 'record:'.$studentRecordId);
+
+        return hash_equals($this->signature($identity, $expiresAt), $signature);
     }
 
     private function signature(string $studentId, int $expiresAt): string

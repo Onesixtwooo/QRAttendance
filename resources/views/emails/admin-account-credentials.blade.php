@@ -29,13 +29,13 @@
                 <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 28px;">
                     <tr>
                         <td style="border-radius:8px; background-color:#0f766e;">
-                            <a href="https://attendance.jpcsolshco.org" style="display:inline-block; padding:14px 26px; border:1px solid #0f766e; border-radius:8px; color:#ffffff; font-size:16px; font-weight:700; text-decoration:none;">Sign in to Attendance System</a>
+                            <a href="{{ url('/') }}" style="display:inline-block; padding:14px 26px; border:1px solid #0f766e; border-radius:8px; color:#ffffff; font-size:16px; font-weight:700; text-decoration:none;">Sign in to Attendance System</a>
                         </td>
                     </tr>
                 </table>
 
                 <p style="margin:0; font-size:14px; line-height:1.6; color:#4b5563;">For your security, please sign in and change your temporary password after your first login.</p>
-                <p style="margin:22px 0 0; font-size:13px; line-height:1.6; color:#6b7280;">If the button does not work, copy and paste this link into your browser:<br><a href="https://attendance.jpcsolshco.org" style="color:#0f766e; word-break:break-all;">https://attendance.jpcsolshco.org</a></p>
+                <p style="margin:22px 0 0; font-size:13px; line-height:1.6; color:#6b7280;">If the button does not work, copy and paste this link into your browser:<br><a href="{{ url('/') }}" style="color:#0f766e; word-break:break-all;">{{ url('/') }}</a></p>
             </td>
         </tr>
         <tr>

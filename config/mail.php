@@ -16,6 +16,10 @@ return [
 
     'default' => env('MAIL_MAILER', 'log'),
 
+    'batch_limit' => (int) env('MAIL_BATCH_LIMIT', 100),
+
+    'brevo_api_key' => env('BREVO_API_KEY'),
+
     /*
     |--------------------------------------------------------------------------
     | Mailer Configurations

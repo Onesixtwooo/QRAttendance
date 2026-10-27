@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Student;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -13,6 +14,9 @@ class StudentPortalTest extends TestCase
 
     public function test_admin_can_create_student_login_and_student_only_sees_own_qr(): void
     {
+        CarbonImmutable::setTestNow(CarbonImmutable::create(2026, 10, 26, 9, 0, 0));
+
+        try {
         $admin = User::factory()->create(['role' => 'admin']);
         $student = Student::create([
             'student_id' => 'STU-100',
@@ -42,6 +46,9 @@ class StudentPortalTest extends TestCase
             ->assertJsonPath('verification_code', app(\App\Support\StudentQrCode::class)->generate($student)['verification_code']);
 
         $this->get(route('students'))->assertRedirect(route('student.portal'));
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
     }
 
     public function test_admin_cannot_open_student_portal(): void

@@ -174,6 +174,22 @@ class StudentPageTest extends TestCase
         $this->assertDatabaseHas('students', ['student_id' => 'STU-GRID-2']);
     }
 
+    public function test_multiple_students_can_be_saved_with_blank_student_ids(): void
+    {
+        config(['mail.default' => 'log']);
+        Mail::fake();
+
+        $response = $this->post('/students/bulk', [
+            'students' => [
+                ['student_id' => '', 'email' => 'blank-one@example.com', 'last_name' => 'Davis', 'first_name' => 'John', 'course' => 'BSIT', 'block' => 'A', 'year_level' => '1st Year'],
+                ['student_id' => '', 'email' => 'blank-two@example.com', 'last_name' => 'Santos', 'first_name' => 'Mika', 'course' => 'BSCS', 'block' => 'B', 'year_level' => '2nd Year'],
+            ],
+        ]);
+
+        $response->assertRedirect('/students')->assertSessionHasNoErrors();
+        $this->assertSame(2, Student::whereNull('student_id')->count());
+    }
+
     public function test_bulk_creation_reports_successful_mail_handoff(): void
     {
         config(['mail.default' => 'smtp']);
@@ -190,6 +206,54 @@ class StudentPageTest extends TestCase
         $response->assertSessionHas('student_status', 'Added 1 student record(s). 1 email(s) submitted to the configured mail transport.');
         $response->assertSessionHas('student_mail_failures', []);
         Mail::assertSent(StudentAccountCredentials::class, 1);
+    }
+
+    public function test_bulk_creation_can_prepare_credentials_as_a_pdf(): void
+    {
+        Mail::fake();
+        Storage::fake('local');
+
+        $response = $this->post('/students/bulk', [
+            'credential_delivery' => 'pdf',
+            'students' => [[
+                'student_id' => 'STU-PDF-BULK', 'email' => 'pdf-bulk@example.com',
+                'last_name' => 'Rivera', 'first_name' => 'Ana', 'course' => 'BSIT',
+                'block' => 'A', 'year_level' => '1st Year',
+            ]],
+        ]);
+
+        $response->assertRedirect('/students')
+            ->assertSessionHas('student_credentials_download');
+        Mail::assertNothingSent();
+
+        $pdf = $this->get($response->getSession()->get('student_credentials_download'));
+        $pdf->assertOk()->assertHeader('content-type', 'application/pdf');
+        $this->assertStringStartsWith('%PDF-1.4', $pdf->streamedContent());
+    }
+
+    public function test_selected_student_account_passwords_can_be_reset_to_a_pdf(): void
+    {
+        Mail::fake();
+        Storage::fake('local');
+        $student = Student::create([
+            'student_id' => 'STU-RESET', 'last_name' => 'Rivera', 'first_name' => 'Ana',
+            'course' => 'BSIT', 'block' => 'A', 'year_level' => '1st Year',
+        ]);
+        $user = User::factory()->create(['email' => 'reset@example.com', 'role' => 'student']);
+        $student->user()->associate($user);
+        $student->save();
+        $oldPassword = $user->password;
+
+        $response = $this->post(route('students.accounts.reset-selected'), [
+            'student_ids' => [$student->id],
+            'credential_delivery' => 'pdf',
+        ]);
+
+        $response->assertRedirect('/students')->assertSessionHas('student_credentials_download');
+        $this->assertNotSame($oldPassword, $user->fresh()->password);
+        $this->assertTrue($user->fresh()->force_password_change);
+        Mail::assertNothingSent();
+        $this->get($response->getSession()->get('student_credentials_download'))->assertOk();
     }
 
     public function test_bulk_creation_reports_failed_mail(): void
@@ -452,6 +516,35 @@ class StudentPageTest extends TestCase
         ]);
     }
 
+    public function test_batch_upload_can_import_multiple_students_with_blank_student_ids(): void
+    {
+        Mail::fake();
+        $csv = implode("\n", [
+            'email,last_name,first_name,course,block,year_level',
+            'blank-one@example.com,Davis,John,BSIT,A,1st Year',
+            'blank-two@example.com,Santos,Mika,BSCS,B,2nd Year',
+        ]);
+
+        $this->post('/students/import', [
+            'student_file' => UploadedFile::fake()->createWithContent('students.csv', $csv),
+        ])->assertRedirect('/students');
+
+        $this->assertSame(2, Student::whereNull('student_id')->count());
+        $this->assertDatabaseHas('students', ['student_id' => null, 'last_name' => 'Davis']);
+        $this->assertDatabaseHas('students', ['student_id' => null, 'last_name' => 'Santos']);
+    }
+
+    public function test_admin_can_test_smtp_connection_and_see_quota_status(): void
+    {
+        config(['mail.brevo_api_key' => null]);
+        Mail::fake();
+
+        $this->getJson('/students/mail-status')
+            ->assertOk()
+            ->assertJsonPath('smtp', 'connected')
+            ->assertJsonPath('quota.available', false);
+    }
+
     public function test_students_can_be_imported_from_windows_encoded_csv(): void
     {
         Mail::fake();
@@ -497,6 +590,34 @@ class StudentPageTest extends TestCase
             ->assertJsonPath('complete', true);
 
         $this->assertDatabaseHas('students', ['student_id' => 'STU-12', 'last_name' => 'Fariñas']);
+    }
+
+    public function test_csv_import_can_prepare_credentials_as_a_pdf_without_sending_email(): void
+    {
+        Mail::fake();
+        Storage::fake('local');
+        $csv = implode("\n", [
+            'student_id,email,last_name,first_name,course,block,year_level',
+            'STU-PDF,pdf@example.com,Rivera,Ana,BSIT,A,1st Year',
+        ]);
+
+        $prepared = $this->postJson('/students/import/prepare', [
+            'credential_delivery' => 'pdf',
+            'student_file' => UploadedFile::fake()->createWithContent('students.csv', $csv),
+        ])->assertOk();
+
+        $progress = $this->postJson('/students/import/progress', ['token' => $prepared->json('token')])
+            ->assertOk()
+            ->assertJsonPath('complete', true);
+
+        $student = Student::where('student_id', 'STU-PDF')->with('user')->firstOrFail();
+        $this->assertTrue($student->user->force_password_change);
+        Mail::assertNothingSent();
+
+        $pdf = $this->get($progress->json('download'));
+        $pdf->assertOk()->assertHeader('content-type', 'application/pdf');
+        $this->assertStringStartsWith('%PDF-1.4', $pdf->streamedContent());
+        $this->get($progress->json('download'))->assertOk();
     }
 
     public function test_xlsx_import_keeps_columns_aligned_when_a_cell_is_blank(): void
@@ -770,5 +891,43 @@ class StudentPageTest extends TestCase
         $response->assertSee('Current status:');
         $response->assertSee('Attendance QR Code');
         $response->assertDontSee('Print QR');
+    }
+
+    public function test_student_without_id_can_be_viewed_with_a_generated_qr_code(): void
+    {
+        $student = Student::create([
+            'student_id' => null,
+            'last_name' => 'Blank',
+            'first_name' => 'Identifier',
+            'course' => 'Information Technology',
+            'block' => 'A',
+            'year_level' => '1st Year',
+        ]);
+
+        $response = $this->get('/students?search=Identifier');
+
+        $response->assertOk();
+        $response->assertSee('Attendance QR Code');
+        $qr = $this->get(route('students.qr', $student))->assertOk()->json();
+        $payload = json_decode($qr['payload'], true);
+
+        $this->assertNull($payload['student_id']);
+        $this->assertSame($student->id, $payload['student_record_id']);
+    }
+
+    public function test_only_admins_can_request_a_student_qr_code(): void
+    {
+        $student = Student::create([
+            'student_id' => null,
+            'last_name' => 'Blank',
+            'first_name' => 'Identifier',
+            'course' => 'Information Technology',
+            'block' => 'A',
+            'year_level' => '1st Year',
+        ]);
+
+        $this->actingAs(User::factory()->create(['role' => 'student']))
+            ->get(route('students.qr', $student))
+            ->assertRedirect(route('student.portal'));
     }
 }

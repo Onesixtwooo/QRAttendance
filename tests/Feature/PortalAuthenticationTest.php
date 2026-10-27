@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Student;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -33,6 +34,39 @@ class PortalAuthenticationTest extends TestCase
         $this->from('/login')->post('/login', ['email' => 'disabled@example.com', 'password' => 'secret-password'])
             ->assertRedirect('/login')->assertSessionHasErrors('email');
         $this->assertGuest();
+    }
+
+    public function test_student_with_temporary_password_is_required_to_change_it(): void
+    {
+        $user = User::factory()->create([
+            'email' => 'student@example.com',
+            'password' => 'temporary-password',
+            'role' => 'student',
+            'force_password_change' => true,
+        ]);
+        Student::create([
+            'user_id' => $user->id,
+            'student_id' => 'STU-FORCE',
+            'last_name' => 'Rivera',
+            'first_name' => 'Ana',
+            'course' => 'BSIT',
+            'block' => 'A',
+            'year_level' => '1st Year',
+        ]);
+
+        $this->post('/login', ['email' => $user->email, 'password' => 'temporary-password'])
+            ->assertRedirect(route('student.portal'));
+
+        $this->patch(route('student.account.update'), ['email' => $user->email])
+            ->assertSessionHasErrors('password');
+
+        $this->patch(route('student.account.update'), [
+            'email' => $user->email,
+            'password' => 'new-password',
+            'password_confirmation' => 'new-password',
+        ])->assertRedirect(route('student.portal'));
+
+        $this->assertFalse($user->fresh()->force_password_change);
     }
 
     public function test_login_is_limited_after_five_failed_attempts(): void
