@@ -57,6 +57,7 @@
     $failedJobs = $failedJobs ?? collect();
     $mailConfig = $mailConfig ?? ['mailer' => config('mail.default'), 'batch_limit' => config('mail.batch_limit'), 'from' => config('mail.from.address')];
     $mailCounts = $mailCounts ?? ['sent_today' => 0, 'failed_today' => 0];
+    $maintenanceMode = $maintenanceMode ?? false;
 @endphp
 
 <!DOCTYPE html>
@@ -197,6 +198,28 @@
                             {{ session('settings_status') }}
                         </div>
                     @endif
+
+                    <section class="rounded-lg border {{ $maintenanceMode ? 'border-amber-200 bg-amber-50' : 'border-zinc-200 bg-white' }} p-5 shadow-sm">
+                        <div class="flex flex-wrap items-start justify-between gap-5">
+                            <div class="max-w-2xl">
+                                <div class="flex items-center gap-3">
+                                    <h2 class="font-bold">Maintenance mode</h2>
+                                    <span class="rounded-full px-2.5 py-1 text-xs font-bold {{ $maintenanceMode ? 'bg-amber-200 text-amber-900' : 'bg-emerald-100 text-emerald-800' }}">
+                                        {{ $maintenanceMode ? 'Active' : 'Off' }}
+                                    </span>
+                                </div>
+                                <p class="mt-2 text-sm text-zinc-600">Show a maintenance page to visitors while admins can continue using the system.</p>
+                            </div>
+                            <form method="POST" action="{{ route('settings.maintenance.update') }}">
+                                @csrf
+                                @method('PATCH')
+                                <input type="hidden" name="maintenance_mode" value="{{ $maintenanceMode ? '0' : '1' }}">
+                                <button type="submit" class="rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm {{ $maintenanceMode ? 'bg-zinc-800 hover:bg-zinc-900' : 'bg-amber-600 hover:bg-amber-700' }}">
+                                    {{ $maintenanceMode ? 'Turn off maintenance' : 'Turn on maintenance' }}
+                                </button>
+                            </form>
+                        </div>
+                    </section>
 
                     <section class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
                         <article class="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">

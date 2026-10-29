@@ -6,6 +6,7 @@ use App\Mail\AdminAccountCredentials;
 use App\Mail\StudentAccountCredentials;
 use App\Models\EmailDeliveryFailure;
 use App\Models\EmailDeliveryAttempt;
+use App\Models\ApplicationSetting;
 use App\Models\Student;
 use App\Models\User;
 use App\Support\EmailDeliveryFailureLogger;
@@ -13,6 +14,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
 use Throwable;
@@ -36,6 +38,8 @@ class SettingsController extends Controller
 
         return view('welcome', [
             'page' => 'settings',
+            'maintenanceMode' => Schema::hasTable('application_settings')
+                && ApplicationSetting::query()->whereKey('maintenance_mode')->value('value') === '1',
             'logTail' => $logTail,
             'logPath' => $logPath,
             'mailFailures' => EmailDeliveryFailure::query()
@@ -113,6 +117,22 @@ class SettingsController extends Controller
         }
 
         return back()->with('settings_status', 'Email sent successfully to '.$failure->recipient.'.');
+    }
+
+    public function updateMaintenance(Request $request): RedirectResponse
+    {
+        $this->ensureAdmin($request);
+
+        $enabled = $request->boolean('maintenance_mode');
+
+        ApplicationSetting::query()->updateOrCreate(
+            ['key' => 'maintenance_mode'],
+            ['value' => $enabled ? '1' : '0'],
+        );
+
+        return back()->with('settings_status', $enabled
+            ? 'Maintenance mode is now active for visitors.'
+            : 'Maintenance mode is now disabled. Visitors can access the system again.');
     }
 
     private function ensureAdmin(Request $request): void

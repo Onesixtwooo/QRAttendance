@@ -16,7 +16,7 @@ Route::get('/', function () {
     return redirect()->route('login');
 });
 
-Route::middleware('guest')->group(function () {
+Route::middleware(['guest', 'throttle:10,1'])->group(function () {
     Route::get('/login', [AuthController::class, 'create'])->name('login');
     Route::post('/login', [AuthController::class, 'store'])->name('login.store');
 });
@@ -28,8 +28,11 @@ Route::middleware('auth')->group(function () {
     Route::get('/my-attendance/attendance-approval', [StudentPortalController::class, 'approval'])->name('student.attendance-approval');
     Route::post('/my-attendance/attendance-approval', [StudentPortalController::class, 'confirmApproval'])->name('student.attendance-approval.confirm');
     Route::patch('/my-attendance/account', [StudentPortalController::class, 'updateAccount'])->name('student.account.update');
-    Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    Route::get('/dashboard', [DashboardController::class, 'index'])
+        ->middleware('auth')
+        ->name('dashboard');
     Route::get('/settings', [SettingsController::class, 'index'])->name('settings');
+    Route::patch('/settings/maintenance', [SettingsController::class, 'updateMaintenance'])->name('settings.maintenance.update');
     Route::post('/settings/mail-failures/{failure}/retry', [SettingsController::class, 'retryMail'])->name('settings.mail-failures.retry');
     Route::get('/users', [UserController::class, 'index'])->name('users');
     Route::post('/users', [UserController::class, 'store'])->name('users.store');

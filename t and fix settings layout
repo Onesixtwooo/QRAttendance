@@ -1,0 +1,7 @@
+ .../assets/{app-CXQkEDIA.js => app-AX3U7EiG.js}    | 14 [32m++[m[31m---[m
+ public/build/assets/app-CnJOF8bj.css               |  1 [31m-[m
+ public/build/assets/app-RImRHz6t.css               |  1 [32m+[m
+ public/build/manifest.json                         |  4 [32m+[m[31m-[m
+ resources/js/app.js                                | 71 [32m+++++++++++[m[31m-----------[m
+ resources/views/welcome.blade.php                  | 26 [32m+++++[m[31m---[m
+ 6 files changed, 63 insertions(+), 54 deletions(-)

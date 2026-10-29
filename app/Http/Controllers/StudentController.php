@@ -553,7 +553,9 @@ class StudentController extends Controller
     {
         $request->validate(['student_file' => ['required', 'file', 'mimes:csv,txt,xlsx', 'max:5120']]);
         $file = $request->file('student_file');
-        $rows = strtolower($file->getClientOriginalExtension()) === 'xlsx'
+        // Use Laravel's content-derived extension after validation, not the
+        // user-supplied filename extension, to choose the parser.
+        $rows = strtolower($file->extension()) === 'xlsx'
             ? $this->readXlsx($file->getRealPath())
             : $this->readCsv($file->getRealPath());
 
