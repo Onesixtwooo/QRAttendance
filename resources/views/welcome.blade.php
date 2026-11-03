@@ -25,6 +25,7 @@
     $activeBooths = $activeBooths ?? 0;
 
     $students = $students ?? collect();
+    $studentsPaginator = $studentsPaginator ?? null;
     $showingInitialStudents = $showingInitialStudents ?? false;
     $editStudent = $editStudent ?? null;
     $yearLevels = ['1st Year', '2nd Year', '3rd Year', '4th Year', '5th Year'];
@@ -670,7 +671,10 @@
 
                     <div class="flex flex-col gap-3 border-t border-zinc-200 p-5 sm:flex-row sm:items-center sm:justify-between">
                         <p class="text-sm text-zinc-500">
-                            @if ($showingInitialStudents)
+                            @if ($studentsPaginator)
+                                Showing <span class="font-semibold text-zinc-800">{{ $studentsPaginator->firstItem() ?? 0 }}–{{ $studentsPaginator->lastItem() ?? 0 }}</span>
+                                of <span class="font-semibold text-zinc-800">{{ $studentsPaginator->total() }}</span> student record(s).
+                            @elseif ($showingInitialStudents)
                                 Showing the first <span class="font-semibold text-zinc-800">{{ $students->count() }}</span> student record(s).
                             @elseif ($studentsLoaded)
                                 <span class="font-semibold text-zinc-800">{{ $students->count() }}</span> student record(s) match the current filters.
@@ -679,6 +683,21 @@
                             @endif
                         </p>
                         <div class="flex flex-col items-stretch gap-2 sm:items-end">
+                            @if ($studentsPaginator?->hasPages())
+                                <nav class="flex items-center justify-end gap-2" aria-label="Student pages">
+                                    @if ($studentsPaginator->onFirstPage())
+                                        <span class="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-400">Previous</span>
+                                    @else
+                                        <a href="{{ $studentsPaginator->previousPageUrl() }}" class="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50">Previous</a>
+                                    @endif
+                                    <span class="px-2 text-xs font-semibold text-zinc-500">Page {{ $studentsPaginator->currentPage() }} of {{ $studentsPaginator->lastPage() }}</span>
+                                    @if ($studentsPaginator->hasMorePages())
+                                        <a href="{{ $studentsPaginator->nextPageUrl() }}" class="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50">Next</a>
+                                    @else
+                                        <span class="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-400">Next</span>
+                                    @endif
+                                </nav>
+                            @endif
                             @if ($students->isNotEmpty())
                                 <form id="bulk-delete-students" method="POST" action="{{ route('students.destroy-selected') }}" onsubmit="return confirm('Delete the selected student records?')">
                                     @csrf
@@ -1286,29 +1305,41 @@
                                         <td class="row-number border border-zinc-300 bg-zinc-50 px-3 py-2 text-center font-semibold text-zinc-500">{{ $index + 1 }}</td>
                                         @foreach (['student_id', 'email', 'last_name', 'first_name'] as $field)
                                             <td class="border border-zinc-300 p-0">
-                                                <input type="{{ $field === 'email' ? 'email' : 'text' }}" name="students[{{ $index }}][{{ $field }}]" value="{{ $row[$field] ?? '' }}" class="w-full border-0 px-3 py-2 outline-none focus:bg-emerald-50 focus:ring-2 focus:ring-inset focus:ring-emerald-500 {{ $errors->bulkStudents->has("students.{$index}.{$field}") ? 'bg-rose-50' : '' }}">
+                                                <input type="{{ $field === 'email' ? 'email' : 'text' }}" name="students[{{ $index }}][{{ $field }}]" value="{{ $row[$field] ?? '' }}" aria-invalid="{{ $errors->bulkStudents->has("students.{$index}.{$field}") ? 'true' : 'false' }}" title="{{ $errors->bulkStudents->first("students.{$index}.{$field}") }}" class="w-full border-0 px-3 py-2 outline-none focus:bg-emerald-50 focus:ring-2 focus:ring-inset focus:ring-emerald-500 {{ $errors->bulkStudents->has("students.{$index}.{$field}") ? 'bg-rose-50' : '' }}">
+                                                @if ($errors->bulkStudents->has("students.{$index}.{$field}"))
+                                                    <p class="px-3 pb-1 text-xs font-medium text-rose-600">{{ $errors->bulkStudents->first("students.{$index}.{$field}") }}</p>
+                                                @endif
                                             </td>
                                         @endforeach
                                         <td class="spreadsheet-fill-cell relative border border-zinc-300 p-0" data-fill-field="course">
-                                            <input name="students[{{ $index }}][course]" value="{{ $row['course'] ?? '' }}" list="bulk-course-options" class="w-full border-0 px-3 py-2 outline-none focus:bg-emerald-50 focus:ring-2 focus:ring-inset focus:ring-emerald-500 {{ $errors->bulkStudents->has("students.{$index}.course") ? 'bg-rose-50' : '' }}">
+                                            <input name="students[{{ $index }}][course]" value="{{ $row['course'] ?? '' }}" list="bulk-course-options" aria-invalid="{{ $errors->bulkStudents->has("students.{$index}.course") ? 'true' : 'false' }}" title="{{ $errors->bulkStudents->first("students.{$index}.course") }}" class="w-full border-0 px-3 py-2 outline-none focus:bg-emerald-50 focus:ring-2 focus:ring-inset focus:ring-emerald-500 {{ $errors->bulkStudents->has("students.{$index}.course") ? 'bg-rose-50' : '' }}">
+                                            @if ($errors->bulkStudents->has("students.{$index}.course"))
+                                                <p class="px-3 pb-1 text-xs font-medium text-rose-600">{{ $errors->bulkStudents->first("students.{$index}.course") }}</p>
+                                            @endif
                                             <button type="button" class="spreadsheet-fill-handle absolute bottom-0 right-0 h-3 w-3 cursor-crosshair border-0 border-l border-t border-emerald-700 bg-emerald-500" title="Drag to fill course" aria-label="Drag to fill course"></button>
                                         </td>
                                         <td class="spreadsheet-fill-cell relative border border-zinc-300 p-0" data-fill-field="block">
-                                            <select name="students[{{ $index }}][block]" class="w-full border-0 bg-white px-3 py-2 outline-none focus:bg-emerald-50 focus:ring-2 focus:ring-inset focus:ring-emerald-500 {{ $errors->bulkStudents->has("students.{$index}.block") ? 'bg-rose-50' : '' }}">
+                                            <select name="students[{{ $index }}][block]" aria-invalid="{{ $errors->bulkStudents->has("students.{$index}.block") ? 'true' : 'false' }}" title="{{ $errors->bulkStudents->first("students.{$index}.block") }}" class="w-full border-0 bg-white px-3 py-2 outline-none focus:bg-emerald-50 focus:ring-2 focus:ring-inset focus:ring-emerald-500 {{ $errors->bulkStudents->has("students.{$index}.block") ? 'bg-rose-50' : '' }}">
                                                 <option value="">No block</option>
                                                 @foreach (range('A', 'G') as $block)
                                                     <option value="{{ $block }}" @selected(($row['block'] ?? '') === $block)>{{ $block }}</option>
                                                 @endforeach
                                             </select>
+                                            @if ($errors->bulkStudents->has("students.{$index}.block"))
+                                                <p class="px-3 pb-1 text-xs font-medium text-rose-600">{{ $errors->bulkStudents->first("students.{$index}.block") }}</p>
+                                            @endif
                                             <button type="button" class="spreadsheet-fill-handle absolute bottom-0 right-0 h-3 w-3 cursor-crosshair border-0 border-l border-t border-emerald-700 bg-emerald-500" title="Drag to fill block" aria-label="Drag to fill block"></button>
                                         </td>
                                         <td class="spreadsheet-fill-cell relative border border-zinc-300 p-0" data-fill-field="year_level">
-                                            <select name="students[{{ $index }}][year_level]" class="w-full border-0 bg-white px-3 py-2 outline-none focus:bg-emerald-50 focus:ring-2 focus:ring-inset focus:ring-emerald-500 {{ $errors->bulkStudents->has("students.{$index}.year_level") ? 'bg-rose-50' : '' }}">
+                                            <select name="students[{{ $index }}][year_level]" aria-invalid="{{ $errors->bulkStudents->has("students.{$index}.year_level") ? 'true' : 'false' }}" title="{{ $errors->bulkStudents->first("students.{$index}.year_level") }}" class="w-full border-0 bg-white px-3 py-2 outline-none focus:bg-emerald-50 focus:ring-2 focus:ring-inset focus:ring-emerald-500 {{ $errors->bulkStudents->has("students.{$index}.year_level") ? 'bg-rose-50' : '' }}">
                                                 <option value="">Select year level</option>
                                                 @foreach ($yearLevels as $yearLevel)
                                                     <option value="{{ $yearLevel }}" @selected(($row['year_level'] ?? '') === $yearLevel)>{{ $yearLevel }}</option>
                                                 @endforeach
                                             </select>
+                                            @if ($errors->bulkStudents->has("students.{$index}.year_level"))
+                                                <p class="px-3 pb-1 text-xs font-medium text-rose-600">{{ $errors->bulkStudents->first("students.{$index}.year_level") }}</p>
+                                            @endif
                                             <button type="button" class="spreadsheet-fill-handle absolute bottom-0 right-0 h-3 w-3 cursor-crosshair border-0 border-l border-t border-emerald-700 bg-emerald-500" title="Drag to fill year level" aria-label="Drag to fill year level"></button>
                                         </td>
                                         <td class="border border-zinc-300 p-0 text-center">

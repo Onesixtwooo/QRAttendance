@@ -54,9 +54,9 @@ class StudentPageTest extends TestCase
         $response->assertDontSee('Time In');
     }
 
-    public function test_students_page_loads_the_first_ten_students_by_default(): void
+    public function test_students_page_loads_twenty_students_per_page_by_default(): void
     {
-        foreach (range(1, 12) as $number) {
+        foreach (range(1, 22) as $number) {
             Student::create([
                 'student_id' => 'STU-'.str_pad((string) $number, 2, '0', STR_PAD_LEFT),
                 'last_name' => 'Student '.str_pad((string) $number, 2, '0', STR_PAD_LEFT),
@@ -72,10 +72,13 @@ class StudentPageTest extends TestCase
         $response->assertOk();
         $response->assertSee('STU-01');
         $response->assertSee('STU-10');
-        $response->assertDontSee('STU-11');
-        $response->assertDontSee('STU-12');
-        $response->assertSee('Showing the first');
-        $response->assertSee('10</span> student record(s).', false);
+        $response->assertSee('STU-20');
+        $response->assertDontSee('STU-21');
+        $response->assertDontSee('STU-22');
+        $response->assertSee('Showing');
+        $response->assertSee('1–20');
+        $response->assertSee('of <span class="font-semibold text-zinc-800">22</span> student record(s).', false);
+        $response->assertSee('Page 1 of 2');
     }
 
     public function test_student_can_be_saved_to_the_database(): void

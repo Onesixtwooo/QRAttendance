@@ -12,7 +12,6 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Str;
 use Illuminate\View\View;
 
 class ScannerController extends Controller
@@ -86,20 +85,44 @@ class ScannerController extends Controller
 
         $scanType = $scanDecision['type'];
 
-        $approvalToken = (string) Str::uuid();
-        Cache::put('attendance-approval:'.$student->id.':'.$approvalToken, [
-            'event_id' => $event->id,
-            'booth_id' => $booth->id,
-            'student_id' => $student->id,
-            'scan_type' => $scanType,
-            'verification_code' => $qrIdentity['verification_code'],
-        ], now()->addMinutes(2));
-        Cache::put('attendance-approval:'.$student->id.':current', $approvalToken, now()->addMinutes(2));
+        try {
+            $record = AttendanceRecord::create([
+                'event_schedule_id' => $event->id,
+                'booth_id' => $booth->id,
+                'student_id' => $student->id,
+                'scanned_at' => now(),
+                'scan_type' => $scanType,
+            ]);
+        } catch (UniqueConstraintViolationException) {
+            return response()->json([
+                'message' => 'This student already has a '.$scanType.' scan for the current event.',
+            ], 409);
+        }
 
         return response()->json([
-            'message' => 'Scan received. The student must approve it from their portal.',
-            'pending_confirmation' => true,
-            'student' => trim($student->first_name.' '.$student->last_name),
+            'message' => match ($record->scan_type) {
+                AttendanceRecord::TYPE_TIME_OUT => 'Time-out scan saved.',
+                AttendanceRecord::TYPE_VERIFICATION => 'Verification scan saved.',
+                default => 'Time-in scan saved.',
+            },
+            'record' => [
+                'id' => $record->id,
+                'event' => $event->title,
+                'scan_type' => $record->scan_type,
+                'scan_type_label' => match ($record->scan_type) {
+                    AttendanceRecord::TYPE_TIME_OUT => 'Time-out',
+                    AttendanceRecord::TYPE_VERIFICATION => 'Verification',
+                    default => 'Time-in',
+                },
+                'student' => trim($student->first_name.' '.$student->last_name),
+                'student_id' => $student->student_id,
+                'verification_code' => $qrIdentity['verification_code'],
+                'course' => $student->course,
+                'block' => $student->block,
+                'year_level' => $student->year_level,
+                'booth' => $booth->name,
+                'time' => $record->scanned_at->format('g:i A'),
+            ],
         ]);
     }
 

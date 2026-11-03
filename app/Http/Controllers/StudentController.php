@@ -29,10 +29,11 @@ class StudentController extends Controller
     {
         $filters = $this->studentFilters($request);
         $filtersApplied = collect($filters)->contains(fn ($value) => filled($value));
-        $studentQuery = $this->filteredStudents($filters);
-        $students = $this->studentRows(
-            $filtersApplied ? $studentQuery->with('user')->get() : $studentQuery->with('user')->limit(10)->get()
-        );
+        $studentsPaginator = $this->filteredStudents($filters)
+            ->with('user')
+            ->paginate(20)
+            ->withQueryString();
+        $students = $this->studentRows($studentsPaginator->getCollection());
 
         $filterOptions = [
             'courses' => Student::query()->select('course')->distinct()->orderBy('course')->pluck('course'),
@@ -49,6 +50,7 @@ class StudentController extends Controller
         return view('welcome', [
             'page' => 'students',
             'students' => $students,
+            'studentsPaginator' => $studentsPaginator,
             'editStudent' => $editStudent,
             'filters' => $filters,
             'filterOptions' => $filterOptions,
