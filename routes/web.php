@@ -18,9 +18,13 @@ Route::get('/', function () {
 
 Route::middleware(['guest', 'throttle:10,1'])->group(function () {
     Route::get('/login', [AuthController::class, 'create'])->name('login');
-    Route::post('/login', [AuthController::class, 'store'])->name('login.store');
+    Route::post('/login', [AuthController::class, 'store'])
+        ->block(10, 10)
+        ->name('login.store');
 });
-Route::post('/logout', [AuthController::class, 'destroy'])->name('logout');
+Route::post('/logout', [AuthController::class, 'destroy'])
+    ->block(10, 10)
+    ->name('logout');
 
 Route::middleware('auth')->group(function () {
     Route::get('/my-attendance', [StudentPortalController::class, 'index'])->name('student.portal');
@@ -55,7 +59,9 @@ Route::middleware('auth')->group(function () {
     Route::patch('/students/{student}', [StudentController::class, 'update'])->name('students.update');
     Route::delete('/students/{student}', [StudentController::class, 'destroy'])->name('students.destroy');
     Route::get('/qr-scanner', [ScannerController::class, 'index'])->name('scanner');
-    Route::post('/qr-scanner/scan', [ScannerController::class, 'scan'])->name('scanner.scan');
+    Route::post('/qr-scanner/scan', [ScannerController::class, 'scan'])
+        ->block(10, 10)
+        ->name('scanner.scan');
     Route::get('/attendance-records', [AttendanceRecordController::class, 'index'])->name('records');
     Route::get('/attendance-records/print', [AttendanceRecordController::class, 'print'])->name('records.print');
     Route::post('/attendance-records', [AttendanceRecordController::class, 'store'])->name('records.store');
@@ -75,5 +81,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/booths', [BoothController::class, 'store'])->name('booths.store');
     Route::patch('/booths/{booth}', [BoothController::class, 'update'])->name('booths.update');
     Route::delete('/booths/{booth}', [BoothController::class, 'destroy'])->name('booths.destroy');
-    Route::post('/booths/heartbeat', [BoothController::class, 'heartbeat'])->name('booths.heartbeat');
+    Route::post('/booths/heartbeat', [BoothController::class, 'heartbeat'])
+        ->block(10, 10)
+        ->name('booths.heartbeat');
 });

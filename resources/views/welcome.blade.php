@@ -1866,6 +1866,12 @@
                     });
                     const data = await response.json();
 
+                    if (response.status === 419) {
+                        setScannerMessage('Your scanner session expired. Reloading…', 'error');
+                        window.setTimeout(() => window.location.reload(), 250);
+                        return;
+                    }
+
                     if (! response.ok) {
                         throw new Error(data.message ?? 'Scan could not be saved.');
                     }
