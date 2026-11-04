@@ -4,6 +4,9 @@ namespace Tests\Feature;
 
 use App\Models\Student;
 use App\Models\User;
+use App\Models\AttendanceRecord;
+use App\Models\Booth;
+use App\Models\EventSchedule;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -56,6 +59,36 @@ class StudentPortalTest extends TestCase
         $this->actingAs(User::factory()->create(['role' => 'admin']))
             ->get(route('student.portal'))
             ->assertForbidden();
+    }
+
+    public function test_student_portal_displays_time_in_and_time_out(): void
+    {
+        $studentUser = User::factory()->create(['role' => 'student']);
+        $student = Student::create([
+            'student_id' => 'STU-201', 'first_name' => 'Ava', 'last_name' => 'Reyes',
+            'course' => 'BSIT', 'block' => 'A', 'year_level' => '1st Year',
+        ]);
+        $student->user()->associate($studentUser);
+        $student->save();
+        $event = EventSchedule::create([
+            'title' => 'Attendance Test', 'event_date' => '2026-10-26',
+            'start_time' => '08:00:00', 'end_time' => '17:00:00', 'venue' => 'Main Hall',
+            'booth' => 'Main Booth', 'status' => 'In Progress',
+        ]);
+        $booth = Booth::create(['name' => 'Main Booth', 'admin_name' => 'Operator']);
+        AttendanceRecord::create([
+            'event_schedule_id' => $event->id, 'booth_id' => $booth->id, 'student_id' => $student->id,
+            'scanned_at' => '2026-10-26 08:15:00', 'scan_type' => AttendanceRecord::TYPE_TIME_IN,
+        ]);
+        AttendanceRecord::create([
+            'event_schedule_id' => $event->id, 'booth_id' => $booth->id, 'student_id' => $student->id,
+            'scanned_at' => '2026-10-26 17:05:00', 'scan_type' => AttendanceRecord::TYPE_TIME_OUT,
+        ]);
+
+        $this->actingAs($studentUser)->get(route('student.portal'))
+            ->assertOk()
+            ->assertSee('Time in: 8:15 AM')
+            ->assertSee('Time out: 5:05 PM');
     }
 
     public function test_student_can_edit_login_account(): void

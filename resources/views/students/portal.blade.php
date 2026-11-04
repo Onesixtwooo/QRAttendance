@@ -68,7 +68,11 @@
                 <article class="mt-4 rounded-lg border border-zinc-200 p-4">
                     <h3 class="font-semibold">{{ $event['title'] }}</h3>
                     <p class="mt-1 text-sm text-zinc-600">{{ $event['date'] }}{{ $event['venue'] ? ' · '.$event['venue'] : '' }}</p>
-                    <p class="mt-2 text-sm text-emerald-700">{{ $event['time_in'] ? 'Time in: '.$event['time_in'] : 'Recorded attendance' }}{{ $event['verified'] ? ' · Verified' : '' }}</p>
+                    <p class="mt-2 text-sm text-emerald-700">
+                        {{ $event['time_in'] ? 'Time in: '.$event['time_in'] : 'Recorded attendance' }}
+                        @if ($event['time_out']) · Time out: {{ $event['time_out'] }} @endif
+                        @if ($event['verified']) · Verified @endif
+                    </p>
                 </article>
             @empty
                 <p class="mt-4 text-sm text-zinc-500">No attended events have been recorded yet.</p>

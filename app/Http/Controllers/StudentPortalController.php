@@ -38,6 +38,7 @@ class StudentPortalController extends Controller
                     'date' => $event?->event_date?->format('M j, Y') ?? 'Date unavailable',
                     'venue' => $event?->venue,
                     'time_in' => $eventRecords->firstWhere('scan_type', AttendanceRecord::TYPE_TIME_IN)?->scanned_at?->format('g:i A'),
+                    'time_out' => $eventRecords->firstWhere('scan_type', AttendanceRecord::TYPE_TIME_OUT)?->scanned_at?->format('g:i A'),
                     'verified' => $eventRecords->contains('scan_type', AttendanceRecord::TYPE_VERIFICATION),
                 ];
             })->values(),
