@@ -385,7 +385,7 @@ class AttendanceRecordController extends Controller
                         $event->event_date->format('Y-m-d').' '.$event->start_time,
                         config('app.timezone')
                     );
-                    $attendanceStatus = $timeIn->scanned_at->gt($eventStartsAt->addMinutes(15))
+                    $attendanceStatus = $timeIn->scanned_at->gt($eventStartsAt->addMinutes(EventSchedule::ATTENDANCE_GRACE_MINUTES))
                         ? 'Late'
                         : 'On Time';
                 }

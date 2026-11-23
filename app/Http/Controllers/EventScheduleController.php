@@ -17,11 +17,23 @@ class EventScheduleController extends Controller
 {
     public function index(Request $request): View
     {
-        $events = EventSchedule::query()
+        $eventFilter = in_array($request->query('events'), ['all', 'today', 'week'], true)
+            ? $request->query('events')
+            : 'today';
+        $today = CarbonImmutable::now(config('app.timezone'));
+
+        $allEvents = EventSchedule::query()
             ->orderBy('event_date')
             ->orderBy('start_time')
             ->get()
             ->map(fn (EventSchedule $event): array => $this->formatEvent($event));
+
+        $events = match ($eventFilter) {
+            'today' => $allEvents->where('event_date', $today->toDateString())->values(),
+            'week' => $allEvents->filter(fn (array $event): bool => $event['event_date'] >= $today->startOfWeek()->toDateString()
+                && $event['event_date'] <= $today->endOfWeek()->toDateString())->values(),
+            default => $allEvents,
+        };
 
         $editEvent = null;
 
@@ -32,6 +44,8 @@ class EventScheduleController extends Controller
         return view('welcome', [
             'page' => 'schedule',
             'events' => $events,
+            'eventFilter' => $eventFilter,
+            'todayEvents' => $allEvents->where('event_date', $today->toDateString())->values(),
             'editEvent' => $editEvent,
             'attendanceArchives' => EventAttendanceArchive::query()
                 ->select(['id', 'original_event_id', 'event_title', 'event_date', 'created_at'])
@@ -205,6 +219,8 @@ class EventScheduleController extends Controller
         if ($event->status !== $status) {
             $event->forceFill(['status' => $status])->save();
         }
+
+        $event->syncAutomaticScanControls();
 
         return [
             'id' => $event->id,

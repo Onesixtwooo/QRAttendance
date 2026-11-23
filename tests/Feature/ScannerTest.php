@@ -2,8 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Models\Booth;
 use App\Models\AttendanceRecord;
+use App\Models\Booth;
 use App\Models\EventSchedule;
 use App\Models\Student;
 use App\Models\User;
@@ -447,7 +447,7 @@ class ScannerTest extends TestCase
         ]);
     }
 
-    public function test_scanning_stops_after_event_end_unless_admin_overrides_schedule_time(): void
+    public function test_schedule_override_does_not_reopen_time_in_after_automatic_cutoff(): void
     {
         $admin = User::factory()->create(['role' => 'admin']);
         $booth = Booth::create([
@@ -480,8 +480,8 @@ class ScannerTest extends TestCase
         $this->postJson(route('scanner.scan'), [
             'payload' => $this->payloadFor($student->student_id),
             'booth_id' => $booth->id,
-        ])->assertOk()->assertJsonPath('record.scan_type', 'time_in');
-        $this->assertDatabaseCount('attendance_records', 1);
+        ])->assertStatus(422)->assertJsonPath('message', 'This student needs a time-in scan before time-out.');
+        $this->assertDatabaseCount('attendance_records', 0);
     }
 
     public function test_verification_phase_requires_prior_time_in(): void
@@ -639,7 +639,3 @@ class ScannerTest extends TestCase
         ], $overrides));
     }
 }
-
-
-
-

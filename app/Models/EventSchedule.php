@@ -2,13 +2,20 @@
 
 namespace App\Models;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class EventSchedule extends Model
 {
+    public const ATTENDANCE_GRACE_MINUTES = 20;
+
+    public const TIME_OUT_OPEN_MINUTES_BEFORE_END = 30;
+
     public const PHASE_TIME_IN = 'time_in';
+
     public const PHASE_TIME_OUT = 'time_out';
+
     public const PHASE_VERIFICATION = 'verification';
 
     protected $fillable = [
@@ -45,5 +52,24 @@ class EventSchedule extends Model
     public function attendanceRecords(): HasMany
     {
         return $this->hasMany(AttendanceRecord::class);
+    }
+
+    public function syncAutomaticScanControls(?CarbonImmutable $now = null): void
+    {
+        if ($this->status !== 'In Progress') {
+            return;
+        }
+
+        $now ??= CarbonImmutable::now(config('app.timezone'));
+        $eventDate = CarbonImmutable::parse($this->event_date, config('app.timezone'));
+        $endsAt = CarbonImmutable::parse($eventDate->format('Y-m-d').' '.$this->end_time, config('app.timezone'));
+
+        if ($now->greaterThanOrEqualTo($endsAt->subMinutes(self::TIME_OUT_OPEN_MINUTES_BEFORE_END))
+            && ($this->scan_phase !== self::PHASE_TIME_OUT || $this->time_in_open)) {
+            $this->forceFill([
+                'scan_phase' => self::PHASE_TIME_OUT,
+                'time_in_open' => false,
+            ])->saveQuietly();
+        }
     }
 }

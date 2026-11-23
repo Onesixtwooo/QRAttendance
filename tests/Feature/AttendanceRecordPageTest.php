@@ -131,7 +131,7 @@ class AttendanceRecordPageTest extends TestCase
         $response->assertSeeInOrder(['Amy Adams', 'Zoe Adams', 'Aaron Zulu']);
     }
 
-    public function test_time_in_after_fifteen_minute_grace_period_is_marked_late(): void
+    public function test_time_in_after_twenty_minute_grace_period_is_marked_late(): void
     {
         [$event, $booth, $student] = $this->recordDependencies();
 
@@ -139,18 +139,18 @@ class AttendanceRecordPageTest extends TestCase
             'event_schedule_id' => $event->id,
             'booth_id' => $booth->id,
             'student_id' => $student->id,
-            'scanned_at' => '2026-07-08 08:16:00',
+            'scanned_at' => '2026-07-08 08:21:00',
             'scan_type' => 'time_in',
         ]);
 
         $response = $this->get('/attendance-records?event_schedule_id='.$event->id.'&course=Information+Technology');
 
         $response->assertOk();
-        $response->assertSee('8:16 AM');
+        $response->assertSee('8:21 AM');
         $response->assertSee('Late');
     }
 
-    public function test_time_in_at_fifteen_minute_cutoff_is_still_on_time(): void
+    public function test_time_in_at_twenty_minute_cutoff_is_still_on_time(): void
     {
         [$event, $booth, $student] = $this->recordDependencies();
 
@@ -158,14 +158,14 @@ class AttendanceRecordPageTest extends TestCase
             'event_schedule_id' => $event->id,
             'booth_id' => $booth->id,
             'student_id' => $student->id,
-            'scanned_at' => '2026-07-08 08:15:00',
+            'scanned_at' => '2026-07-08 08:20:00',
             'scan_type' => 'time_in',
         ]);
 
         $response = $this->get('/attendance-records?event_schedule_id='.$event->id.'&course=Information+Technology');
 
         $response->assertOk();
-        $response->assertSee('8:15 AM');
+        $response->assertSee('8:20 AM');
         $response->assertSee('On Time');
     }
 

@@ -19,6 +19,8 @@ class DashboardTest extends TestCase
     {
         Carbon::setTestNow('2026-07-14 10:00:00');
         $admin = User::factory()->create(['role' => 'admin']);
+        User::factory()->create(['role' => 'booth']);
+        User::factory()->create(['role' => 'student']);
         $event = EventSchedule::create([
             'title' => 'Assembly',
             'event_date' => today(),

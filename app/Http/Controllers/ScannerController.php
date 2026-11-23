@@ -226,7 +226,7 @@ class ScannerController extends Controller
     {
         $now = CarbonImmutable::now(config('app.timezone'));
 
-        return EventSchedule::query()
+        $event = EventSchedule::query()
             ->where('status', 'In Progress')
             ->where(function ($query) use ($now): void {
                 $query->where('override_schedule_time', true)
@@ -238,6 +238,10 @@ class ScannerController extends Controller
             ->orderByDesc('event_date')
             ->orderByDesc('start_time')
             ->first();
+
+        $event?->syncAutomaticScanControls($now);
+
+        return $event;
     }
 
     private function nextScanDecision(EventSchedule $event, Student $student): array
@@ -284,7 +288,7 @@ class ScannerController extends Controller
         if ($existingTypes->contains($requiredType)) {
             return [
                 'type' => null,
-                    'message' => 'This student already has a '.$requiredType.' scan for the current event.',
+                'message' => 'This student already has a '.$requiredType.' scan for the current event.',
                 'status' => 409,
             ];
         }

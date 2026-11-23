@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\AttendanceRecord;
 use App\Models\Booth;
+use App\Models\EventSchedule;
 use App\Models\Student;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\View\View;
 
@@ -63,7 +65,9 @@ class DashboardController extends Controller
         return $records->filter(function (AttendanceRecord $record): bool {
             $startTime = $record->eventSchedule?->start_time;
 
-            return $startTime && $record->scanned_at->format('H:i:s') > $startTime;
+            return $startTime && $record->scanned_at->format('H:i:s') > CarbonImmutable::parse($startTime)
+                ->addMinutes(EventSchedule::ATTENDANCE_GRACE_MINUTES)
+                ->format('H:i:s');
         })->count();
     }
 

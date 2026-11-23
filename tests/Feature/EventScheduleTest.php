@@ -25,7 +25,7 @@ class EventScheduleTest extends TestCase
 
     public function test_event_schedule_add_form_opens_from_modal_trigger(): void
     {
-        $response = $this->get('/event-schedule');
+        $response = $this->get('/event-schedule?events=all');
 
         $response->assertOk();
         $response->assertSee('href="#add-event-modal"', false);
@@ -71,10 +71,10 @@ class EventScheduleTest extends TestCase
             'status' => 'Scheduled',
         ]);
 
-        $response = $this->get('/event-schedule?edit='.$event->id);
+        $response = $this->get('/event-schedule?edit='.$event->id.'&events=all');
 
         $response->assertOk();
-        $response->assertSee('/event-schedule?edit='.$event->id.'#edit-event-modal', false);
+        $response->assertSee('edit='.$event->id, false);
         $response->assertSee('id="edit-event-modal"', false);
         $response->assertSee('class="modal-overlay fixed inset-0 z-50 is-open', false);
         $response->assertSee('Update Event');
@@ -127,7 +127,7 @@ class EventScheduleTest extends TestCase
             'status' => 'Cancelled',
         ]);
 
-        $response = $this->get('/event-schedule');
+        $response = $this->get('/event-schedule?events=all');
 
         $response->assertOk();
         $response->assertSee('Completed');
@@ -161,6 +161,45 @@ class EventScheduleTest extends TestCase
         Carbon::setTestNow();
     }
 
+    public function test_event_schedule_can_be_filtered_to_today(): void
+    {
+        Carbon::setTestNow('2026-07-09 12:00:00');
+
+        try {
+            foreach ([
+                ['Yesterday Event', '2026-07-08'],
+                ['Today Event', '2026-07-09'],
+                ['Tomorrow Event', '2026-07-10'],
+            ] as [$title, $date]) {
+                EventSchedule::create([
+                    'title' => $title,
+                    'event_date' => $date,
+                    'start_time' => '09:00',
+                    'end_time' => '10:00',
+                    'venue' => 'Main Hall',
+                    'booth' => 'Not assigned',
+                    'status' => 'Scheduled',
+                ]);
+            }
+
+            $this->get('/event-schedule?events=today')
+                ->assertOk()
+                ->assertSee('value="today" selected', false)
+                ->assertSee('Today Event')
+                ->assertDontSee('Yesterday Event')
+                ->assertDontSee('Tomorrow Event');
+
+            $this->get('/event-schedule')
+                ->assertOk()
+                ->assertSee('value="today" selected', false)
+                ->assertSee('Today Event')
+                ->assertDontSee('Yesterday Event')
+                ->assertDontSee('Tomorrow Event');
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     public function test_scanning_controls_are_hidden_until_event_is_in_progress(): void
     {
         Carbon::setTestNow('2026-07-09 08:00:00');
@@ -175,7 +214,7 @@ class EventScheduleTest extends TestCase
             'status' => 'Upcoming',
         ]);
 
-        $response = $this->get('/event-schedule');
+        $response = $this->get('/event-schedule?events=all');
 
         $response->assertOk();
         $response->assertSee('Future Orientation');
@@ -275,7 +314,7 @@ class EventScheduleTest extends TestCase
                 ->assertRedirect(route('schedule'))
                 ->assertSessionHasNoErrors();
 
-            $this->get(route('schedule'))
+            $this->get(route('schedule', ['events' => 'all']))
                 ->assertSee('Schedule override active');
             $this->get(route('scanner'))
                 ->assertSee('Past Orientation');
@@ -401,7 +440,7 @@ class EventScheduleTest extends TestCase
             'scan_phase' => 'time_out',
         ]);
 
-        $page = $this->get('/event-schedule');
+        $page = $this->get('/event-schedule?events=all');
 
         $page->assertOk();
         $page->assertSee('Reopen Time-in');
@@ -417,6 +456,36 @@ class EventScheduleTest extends TestCase
         ]);
 
         Carbon::setTestNow();
+    }
+
+    public function test_time_out_opens_and_time_in_closes_thirty_minutes_before_event_end_even_with_override(): void
+    {
+        Carbon::setTestNow('2026-07-08 11:30:00');
+
+        try {
+            $event = EventSchedule::create([
+                'title' => 'Override Morning Event',
+                'event_date' => '2026-07-08',
+                'start_time' => '08:00',
+                'end_time' => '12:00',
+                'venue' => 'Main Hall',
+                'booth' => 'Not assigned',
+                'status' => 'In Progress',
+                'override_schedule_time' => true,
+                'scan_phase' => EventSchedule::PHASE_TIME_IN,
+                'time_in_open' => true,
+            ]);
+
+            $this->get('/event-schedule?events=all')->assertOk();
+
+            $this->assertDatabaseHas('event_schedules', [
+                'id' => $event->id,
+                'scan_phase' => EventSchedule::PHASE_TIME_OUT,
+                'time_in_open' => false,
+            ]);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_event_time_in_scanning_can_be_closed_and_opened(): void
