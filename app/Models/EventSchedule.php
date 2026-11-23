@@ -12,6 +12,8 @@ class EventSchedule extends Model
 
     public const TIME_OUT_OPEN_MINUTES_BEFORE_END = 30;
 
+    public const AUTO_ACTIVATE_MINUTES_BEFORE_START = 90;
+
     public const PHASE_TIME_IN = 'time_in';
 
     public const PHASE_TIME_OUT = 'time_out';
@@ -71,5 +73,18 @@ class EventSchedule extends Model
                 'time_in_open' => false,
             ])->saveQuietly();
         }
+    }
+
+    public function startsWithinAutomaticActivationWindow(?CarbonImmutable $now = null): bool
+    {
+        if ($this->status !== 'Upcoming') {
+            return false;
+        }
+
+        $now ??= CarbonImmutable::now(config('app.timezone'));
+        $eventDate = CarbonImmutable::parse($this->event_date, config('app.timezone'));
+        $startsAt = CarbonImmutable::parse($eventDate->format('Y-m-d').' '.$this->start_time, config('app.timezone'));
+
+        return $now->greaterThanOrEqualTo($startsAt->subMinutes(self::AUTO_ACTIVATE_MINUTES_BEFORE_START));
     }
 }

@@ -261,7 +261,10 @@ class EventScheduleController extends Controller
             return 'Completed';
         }
 
-        if ($startsAt->lessThanOrEqualTo($now) && $endsAt->greaterThanOrEqualTo($now)) {
+        if (($startsAt->lessThanOrEqualTo($now)
+                || ($event->status === 'Upcoming'
+                    && $startsAt->subMinutes(EventSchedule::AUTO_ACTIVATE_MINUTES_BEFORE_START)->lessThanOrEqualTo($now)))
+            && $endsAt->greaterThanOrEqualTo($now)) {
             return 'In Progress';
         }
 

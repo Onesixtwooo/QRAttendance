@@ -226,6 +226,17 @@ class ScannerController extends Controller
     {
         $now = CarbonImmutable::now(config('app.timezone'));
 
+        EventSchedule::query()
+            ->where('status', 'Upcoming')
+            ->whereDate('event_date', $now->toDateString())
+            ->whereTime('end_time', '>=', $now->format('H:i:s'))
+            ->get()
+            ->each(function (EventSchedule $event) use ($now): void {
+                if ($event->startsWithinAutomaticActivationWindow($now)) {
+                    $event->forceFill(['status' => 'In Progress'])->saveQuietly();
+                }
+            });
+
         $event = EventSchedule::query()
             ->where('status', 'In Progress')
             ->where(function ($query) use ($now): void {

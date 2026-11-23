@@ -161,6 +161,31 @@ class EventScheduleTest extends TestCase
         Carbon::setTestNow();
     }
 
+    public function test_event_becomes_in_progress_ninety_minutes_before_start(): void
+    {
+        Carbon::setTestNow('2026-07-09 06:30:00');
+
+        $event = EventSchedule::create([
+            'title' => 'Early Activation Event',
+            'event_date' => '2026-07-09',
+            'start_time' => '08:00',
+            'end_time' => '10:00',
+            'venue' => 'Main Hall',
+            'booth' => 'Not assigned',
+            'status' => 'Upcoming',
+        ]);
+
+        $this->get('/event-schedule?events=all')->assertOk();
+
+        $this->assertDatabaseHas('event_schedules', [
+            'id' => $event->id,
+            'status' => 'In Progress',
+            'time_in_open' => true,
+        ]);
+
+        Carbon::setTestNow();
+    }
+
     public function test_event_schedule_can_be_filtered_to_today(): void
     {
         Carbon::setTestNow('2026-07-09 12:00:00');
